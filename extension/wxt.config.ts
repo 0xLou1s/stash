@@ -9,7 +9,9 @@ export default defineConfig({
   manifest: {
     name: "Stash for X",
     description: "Save X posts to your private Stash library.",
-    permissions: ["storage"],
+    permissions: ["storage", "alarms"],
+    // The Stash Mac app's local endpoint (see src/lib/sync.ts).
+    host_permissions: ["http://127.0.0.1/*"],
   },
   vite: () => ({
     plugins: [tailwindcss()],

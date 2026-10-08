@@ -86,7 +86,7 @@ struct GalleryView: View {
     private func interactive(_ content: some View, for bookmark: Bookmark) -> some View {
         content
             .onTapGesture(count: 2) { openURL(bookmark.url) }
-            .onTapGesture { selection = bookmark.id }
+            .onTapGesture { selection = selection == bookmark.id ? nil : bookmark.id }
             .contextMenu { BookmarkActions(bookmark: bookmark) }
             .draggable(bookmark.id)
     }

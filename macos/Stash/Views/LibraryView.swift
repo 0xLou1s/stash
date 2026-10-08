@@ -63,7 +63,8 @@ struct LibraryView: View {
             selection = nil
         }
         .onChange(of: selection) {
-            if selection != nil { showsInspector = true }
+            // Selecting a post opens the panel; deselecting (clicking it again) closes it.
+            showsInspector = selection != nil
         }
         .alert(
             "Something went wrong",
@@ -106,7 +107,9 @@ struct LibraryView: View {
 }
 
 #Preview {
-    @Previewable @State var store = BookmarkStore(service: MockBookmarkService())
+    @Previewable @State var store = BookmarkStore(
+        service: LocalBookmarkService(fileURL: .temporaryDirectory.appending(path: "stash-preview.json"))
+    )
     LibraryView()
         .environment(store)
         .task { await store.load() }

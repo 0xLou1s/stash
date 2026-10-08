@@ -32,14 +32,26 @@ export interface Bookmark {
 
 export type NewBookmark = Omit<Bookmark, "savedAt">
 
-// Saved posts live in chrome.storage.local for now. When the server exists,
-// these functions are the only place that needs to change.
+/** What still has to reach the library (the Mac app now, the cloud later), by post id. */
+export type PendingChange = "upsert" | "delete"
+
+// Saved posts live in chrome.storage.local, which survives browser restarts
+// and extension updates. Every change is also queued in `pendingItem` until
+// the background script delivers it (see sync.ts).
 const bookmarksItem = storage.defineItem<Record<string, Bookmark>>("local:bookmarks", {
+  fallback: {},
+})
+
+const pendingItem = storage.defineItem<Record<string, PendingChange>>("local:pendingSync", {
   fallback: {},
 })
 
 export async function getBookmarks(): Promise<Bookmark[]> {
   return sortNewestFirst(await bookmarksItem.getValue())
+}
+
+export async function getBookmark(id: string): Promise<Bookmark | undefined> {
+  return (await bookmarksItem.getValue())[id]
 }
 
 export function watchBookmarks(callback: (bookmarks: Bookmark[]) => void): () => void {
@@ -52,11 +64,46 @@ export async function saveBookmark(bookmark: NewBookmark): Promise<void> {
     ...all,
     [bookmark.id]: { ...bookmark, savedAt: new Date().toISOString() },
   })
+  await queueChange(bookmark.id, "upsert")
 }
 
 export async function removeBookmark(id: string): Promise<void> {
   const { [id]: _removed, ...rest } = await bookmarksItem.getValue()
   await bookmarksItem.setValue(rest)
+  await queueChange(id, "delete")
+}
+
+// MARK: - Sync queue
+
+export async function getPendingChanges(): Promise<Record<string, PendingChange>> {
+  return pendingItem.getValue()
+}
+
+export function watchPendingChanges(callback: (pending: Record<string, PendingChange>) => void): () => void {
+  return pendingItem.watch(callback)
+}
+
+/** Clears a delivered change, unless a newer one for the same post was queued meanwhile. */
+export async function markDelivered(id: string, change: PendingChange): Promise<void> {
+  const pending = await pendingItem.getValue()
+  if (pending[id] !== change) return
+  const { [id]: _delivered, ...rest } = pending
+  await pendingItem.setValue(rest)
+}
+
+/** Queues every saved post, e.g. for posts saved before sync existed. */
+export async function queueAllForSync(): Promise<void> {
+  const ids = Object.keys(await bookmarksItem.getValue())
+  const pending = await pendingItem.getValue()
+  await pendingItem.setValue({
+    ...Object.fromEntries(ids.map((id) => [id, "upsert" as const])),
+    ...pending,
+  })
+}
+
+async function queueChange(id: string, change: PendingChange): Promise<void> {
+  const pending = await pendingItem.getValue()
+  await pendingItem.setValue({ ...pending, [id]: change })
 }
 
 function sortNewestFirst(all: Record<string, Bookmark>): Bookmark[] {

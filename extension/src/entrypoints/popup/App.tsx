@@ -1,5 +1,5 @@
 import { Archive, Play, Search, Trash2 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -7,12 +7,18 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useBookmarks } from "@/hooks/use-bookmarks"
+import { useSyncStatus } from "@/hooks/use-sync-status"
 import { removeBookmark, type Bookmark, type Media } from "@/lib/bookmarks"
 import { timeAgo } from "@/lib/format"
 
 export default function App() {
   const bookmarks = useBookmarks()
   const [query, setQuery] = useState("")
+
+  // Try delivering anything queued as soon as the popup opens.
+  useEffect(() => {
+    void browser.runtime.sendMessage({ type: "sync" }).catch(() => {})
+  }, [])
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -77,6 +83,8 @@ export default function App() {
             </ScrollArea>
           )}
         </div>
+
+        <SyncFooter />
       </div>
     </TooltipProvider>
   )
@@ -150,6 +158,29 @@ function MediaThumbnail({ media, count }: { media: Media; count: number }) {
         </span>
       )}
     </div>
+  )
+}
+
+function SyncFooter() {
+  const sync = useSyncStatus()
+  if (!sync) return null
+
+  const { pendingCount, status } = sync
+  const [tone, message] =
+    pendingCount > 0
+      ? [
+          "bg-amber-500",
+          `${pendingCount === 1 ? "1 change" : `${pendingCount} changes`} waiting. Open Stash on your Mac to sync.`,
+        ]
+      : status.reachable
+        ? ["bg-emerald-500", "Synced with Stash for Mac"]
+        : ["bg-muted-foreground/50", "Saved in this browser. Open Stash on your Mac to sync."]
+
+  return (
+    <footer className="flex items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground" role="status">
+      <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden />
+      {message}
+    </footer>
   )
 }
 

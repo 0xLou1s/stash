@@ -32,8 +32,9 @@ struct GalleryTile: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .overlay(alignment: .topLeading) {
-            if let cover = bookmark.media.first, cover.isPlayable, !isHovered {
+            if let cover = bookmark.media.first, cover.isPlayable {
                 PlayableBadge(kind: cover.kind)
+                    .opacity(isHovered ? 0 : 1)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -42,8 +43,11 @@ struct GalleryTile: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if isHovered && !bookmark.media.isEmpty {
+            // Always there and faded in, rather than inserted on hover, so its
+            // avatar doesn't reload (and flash) every time.
+            if !bookmark.media.isEmpty {
                 hoverCaption
+                    .opacity(isHovered ? 1 : 0)
             }
         }
         .overlay {
@@ -82,7 +86,6 @@ struct GalleryTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom))
         .allowsHitTesting(false)
-        .transition(.opacity)
     }
 }
 

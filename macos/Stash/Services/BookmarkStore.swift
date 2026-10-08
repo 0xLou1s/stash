@@ -10,7 +10,7 @@ struct AuthorSummary: Identifiable {
 
 @Observable
 final class BookmarkStore {
-    /// Everything, including posts in Trash.
+    /// Everything not deleted, including posts in Trash.
     private(set) var bookmarks: [Bookmark] = []
     private(set) var collections: [BookmarkCollection] = []
     private(set) var isLoading = false
@@ -32,14 +32,51 @@ final class BookmarkStore {
         defer { isLoading = false }
         do {
             bookmarks = try await service.fetchBookmarks().sorted { $0.savedAt > $1.savedAt }
-            collections = try await service.fetchCollections()
+            collections = try await service.fetchCollections().sorted { $0.createdAt < $1.createdAt }
         } catch {
             errorMessage = error.localizedDescription
+        }
+        if let warning = service.takeLaunchWarning() {
+            errorMessage = warning
         }
     }
 
     func bookmark(id: Bookmark.ID) -> Bookmark? {
         bookmarks.first { $0.id == id }
+    }
+
+    // MARK: - From the extension
+
+    /// A post saved in the browser. Saving again refreshes its content and
+    /// brings it back from Trash, but keeps its collections and first save date.
+    @discardableResult
+    func ingest(_ incoming: Bookmark) async -> Bool {
+        var merged = incoming
+        if let existing = bookmark(id: incoming.id) {
+            merged.collectionIDs = existing.collectionIDs
+            merged.savedAt = existing.savedAt
+        }
+        merged.trashedAt = nil
+        merged.deletedAt = nil
+        merged.updatedAt = .now
+
+        do {
+            try await service.saveBookmark(merged)
+            bookmarks.removeAll { $0.id == merged.id }
+            bookmarks.append(merged)
+            bookmarks.sort { $0.savedAt > $1.savedAt }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// A post removed in the browser. It goes to Trash rather than vanishing.
+    @discardableResult
+    func ingestRemoval(id: Bookmark.ID) async -> Bool {
+        guard let existing = bookmark(id: id), !existing.isTrashed else { return true }
+        return await update(id) { $0.trashedAt = .now }
     }
 
     // MARK: - Changes
@@ -91,8 +128,9 @@ final class BookmarkStore {
             suffix += 1
         }
 
+        let collection = BookmarkCollection(name: name)
         do {
-            let collection = try await service.createCollection(named: name)
+            try await service.saveCollection(collection)
             collections.append(collection)
             return collection
         } catch {
@@ -104,8 +142,9 @@ final class BookmarkStore {
     func renameCollection(_ id: BookmarkCollection.ID, to name: String) async {
         guard var updated = collections.first(where: { $0.id == id }) else { return }
         updated.name = name
+        updated.updatedAt = .now
         do {
-            try await service.updateCollection(updated)
+            try await service.saveCollection(updated)
             if let index = collections.firstIndex(where: { $0.id == id }) {
                 collections[index] = updated
             }
@@ -118,7 +157,7 @@ final class BookmarkStore {
         do {
             try await service.deleteCollection(id: id)
             collections.removeAll { $0.id == id }
-            for index in bookmarks.indices {
+            for index in bookmarks.indices where bookmarks[index].collectionIDs.contains(id) {
                 bookmarks[index].collectionIDs.remove(id)
             }
         } catch {
@@ -126,16 +165,20 @@ final class BookmarkStore {
         }
     }
 
-    private func update(_ id: Bookmark.ID, _ change: (inout Bookmark) -> Void) async {
-        guard var updated = bookmark(id: id) else { return }
+    @discardableResult
+    private func update(_ id: Bookmark.ID, _ change: (inout Bookmark) -> Void) async -> Bool {
+        guard var updated = bookmark(id: id) else { return false }
         change(&updated)
+        updated.updatedAt = .now
         do {
-            try await service.updateBookmark(updated)
+            try await service.saveBookmark(updated)
             if let index = bookmarks.firstIndex(where: { $0.id == id }) {
                 bookmarks[index] = updated
             }
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

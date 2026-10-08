@@ -30,7 +30,8 @@ struct BookmarkInspector: View {
                         case .photo:
                             RemoteImage(url: media.url, placeholderAspectRatio: media.aspectRatio)
                         case .video:
-                            InspectorVideo(media: media)
+                            // Only the first video starts by itself, so several don't play at once.
+                            InspectorVideo(media: media, autoplays: media == bookmark.media.first(where: \.isPlayable))
                         case .gif:
                             LoopingVideoView(url: media.url)
                                 .aspectRatio(media.aspectRatio, contentMode: .fit)
