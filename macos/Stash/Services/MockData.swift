@@ -17,12 +17,25 @@ enum MockData {
         (1200, 675), (1000, 1250), (1200, 900), (1080, 1080), (900, 1200),
     ]
 
+    // Public 10-second test clips (1280x720). They have no poster images,
+    // so the still is a placeholder photo.
+    private static func sampleVideo(_ name: String) -> Bookmark.Media {
+        .init(
+            kind: .video,
+            url: URL(string: "https://test-videos.co.uk/vids/\(name.lowercased().replacingOccurrences(of: "_", with: ""))/mp4/h264/720/\(name)_720_10s_1MB.mp4")!,
+            posterURL: URL(string: "https://picsum.photos/seed/\(name)/1280/720")!,
+            width: 1280,
+            height: 720
+        )
+    }
+
     private static func post(
         _ id: String,
         name: String,
         handle: String,
         text: String,
         media: Int = 0,
+        video: String? = nil,
         in collectionIDs: Set<String> = [],
         trashed: Bool = false,
         postedHoursAgo: Double,
@@ -33,9 +46,10 @@ enum MockData {
             url: URL(string: "https://x.com/\(handle)/status/\(id)")!,
             author: .init(name: name, handle: handle, avatarURL: nil),
             text: text,
-            media: (0..<media).map { index in
+            media: video.map { [sampleVideo($0)] } ?? (0..<media).map { index in
                 let size = mediaSizes[(Int(id.suffix(2))! + index) % mediaSizes.count]
                 return .init(
+                    kind: .photo,
                     url: URL(string: "https://picsum.photos/seed/\(id)-\(index)/\(size.width)/\(size.height)")!,
                     width: Double(size.width),
                     height: Double(size.height)
@@ -115,5 +129,14 @@ enum MockData {
         post("1843000000000000022", name: "Maya Chen", handle: "mayabuilds",
              text: "Found an old notebook from 2019 with the first sketch of this app.",
              media: 1, postedHoursAgo: 180, savedHoursAgo: 80),
+        post("1843000000000000023", name: "Jordan Lee", handle: "jordanlee",
+             text: "Motion study for the onboarding screens. Loop it a few times.",
+             video: "Jellyfish", in: ["design"], postedHoursAgo: 6, savedHoursAgo: 2),
+        post("1843000000000000024", name: "Priya Nair", handle: "priyanair",
+             text: "Drone footage from the coast last weekend.",
+             video: "Sintel", in: ["photography"], postedHoursAgo: 26, savedHoursAgo: 9),
+        post("1843000000000000025", name: "Devon Park", handle: "devonpark",
+             text: "30 second demo of the new sync engine.",
+             video: "Big_Buck_Bunny", in: ["engineering"], postedHoursAgo: 70, savedHoursAgo: 25),
     ]
 }

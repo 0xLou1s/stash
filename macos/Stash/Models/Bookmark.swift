@@ -9,9 +9,22 @@ struct Bookmark: Identifiable, Hashable, Codable {
     }
 
     struct Media: Hashable, Codable {
+        enum Kind: String, Codable {
+            case photo, video, gif
+        }
+
+        var kind: Kind
+        /// The image for photos; the mp4 for videos and GIFs.
         var url: URL
+        /// Still frame for videos and GIFs.
+        var posterURL: URL?
         var width: Double?
         var height: Double?
+
+        var isPlayable: Bool { kind != .photo }
+
+        /// The still image to show when not playing.
+        var stillURL: URL? { isPlayable ? posterURL : url }
 
         var aspectRatio: CGFloat {
             guard let width, let height, width > 0, height > 0 else { return 4 / 3 }

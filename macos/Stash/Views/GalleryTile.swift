@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A post in the Rows layout: the cover image cropped to the tile, or the text for text-only posts.
+/// A post in the gallery. Fills whatever frame the layout gives it: the cover
+/// image or video cropped to fit, or the text for text-only posts.
 struct GalleryTile: View {
     let bookmark: Bookmark
     let isSelected: Bool
@@ -10,13 +11,31 @@ struct GalleryTile: View {
     var body: some View {
         Group {
             if let cover = bookmark.media.first {
-                RemoteImage(url: cover.url, contentMode: .fill)
+                ZStack {
+                    if let still = cover.stillURL {
+                        RemoteImage(url: still, contentMode: .fill)
+                    } else {
+                        Rectangle().fill(.quaternary)
+                    }
+
+                    // Play videos and GIFs while the pointer is over them.
+                    if cover.isPlayable && isHovered {
+                        LoopingVideoView(url: cover.url)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
             } else {
                 textTile
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        .overlay(alignment: .topLeading) {
+            if let cover = bookmark.media.first, cover.isPlayable, !isHovered {
+                PlayableBadge(kind: cover.kind)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if bookmark.media.count > 1 {
                 MediaCountBadge(count: bookmark.media.count)
@@ -42,6 +61,7 @@ struct GalleryTile: View {
             Text(bookmark.text)
                 .font(.callout)
                 .lineSpacing(2)
+                .lineLimit(8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             AuthorLine(author: bookmark.author)
         }
@@ -61,7 +81,29 @@ struct GalleryTile: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom))
+        .allowsHitTesting(false)
         .transition(.opacity)
+    }
+}
+
+private struct PlayableBadge: View {
+    let kind: Bookmark.Media.Kind
+
+    var body: some View {
+        Group {
+            if kind == .gif {
+                Text("GIF")
+                    .font(.caption2.weight(.bold))
+            } else {
+                Image(systemName: "play.fill")
+                    .font(.caption2)
+                    .accessibilityLabel("Video")
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(8)
     }
 }
 

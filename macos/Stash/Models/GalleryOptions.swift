@@ -1,7 +1,7 @@
 import Foundation
 
 enum GalleryLayoutStyle: String, CaseIterable, Identifiable {
-    case rows, masonry
+    case masonry, rows
 
     var id: Self { self }
 

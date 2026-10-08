@@ -3,7 +3,7 @@ import SwiftUI
 struct GalleryView: View {
     @Environment(BookmarkStore.self) private var store
     @Environment(\.openURL) private var openURL
-    @AppStorage("galleryLayout") private var layoutStyle: GalleryLayoutStyle = .rows
+    @AppStorage("galleryLayoutStyle") private var layoutStyle: GalleryLayoutStyle = .masonry
     @AppStorage("galleryScale") private var scale = 1.0
     @AppStorage("gallerySort") private var sortOrder: GallerySortOrder = .newestSaved
 
@@ -26,9 +26,15 @@ struct GalleryView: View {
                         }
                     }
                 case .masonry:
+                    // Equal-width columns; every image and video keeps its own height.
                     MasonryLayout(minColumnWidth: 220 * scale, spacing: 20) {
                         ForEach(sorted) { bookmark in
-                            interactive(BookmarkCard(bookmark: bookmark, isSelected: selection == bookmark.id), for: bookmark)
+                            let tile = interactive(GalleryTile(bookmark: bookmark, isSelected: selection == bookmark.id), for: bookmark)
+                            if let cover = bookmark.media.first {
+                                tile.aspectRatio(cover.aspectRatio, contentMode: .fit)
+                            } else {
+                                tile
+                            }
                         }
                     }
                 }

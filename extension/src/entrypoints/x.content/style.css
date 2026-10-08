@@ -1,3 +1,5 @@
+/* Injected into x.com, so plain CSS with prefixed class names (no Tailwind here). */
+
 .stash-slot {
   display: flex;
   align-items: center;

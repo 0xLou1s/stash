@@ -25,8 +25,18 @@ struct BookmarkInspector: View {
                 }
 
                 ForEach(bookmark.media, id: \.self) { media in
-                    RemoteImage(url: media.url, placeholderAspectRatio: media.aspectRatio)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Group {
+                        switch media.kind {
+                        case .photo:
+                            RemoteImage(url: media.url, placeholderAspectRatio: media.aspectRatio)
+                        case .video:
+                            InspectorVideo(media: media)
+                        case .gif:
+                            LoopingVideoView(url: media.url)
+                                .aspectRatio(media.aspectRatio, contentMode: .fit)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
 
