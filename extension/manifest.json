@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Stash for X",
+  "version": "0.1.0",
+  "description": "Save X posts to your Stash library.",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
