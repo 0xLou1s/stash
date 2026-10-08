@@ -5,5 +5,14 @@
     <link>https://github.com/0xLou1s/stash</link>
     <description>Updates for Stash for Mac. Written by scripts/release-mac.sh; installed copies read it.</description>
     <language>en</language>
+    <item>
+      <title>Version 0.1.1</title>
+      <pubDate>Thu, 08 Oct 2026 18:14:19 GMT</pubDate>
+      <sparkle:version>9</sparkle:version>
+      <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[Updates now come from the main Stash repo. Nothing else changed.]]></description>
+      <enclosure url="https://github.com/0xLou1s/stash/releases/download/mac-v0.1.1/Stash-0.1.1.zip" type="application/octet-stream" sparkle:edSignature="A91Jj4UVy6lo7GgnyFP1CFGFLyXK5RBFkwFbFSqEWon43Kx8V74ctnW6NcKl3rGPIxsOIXAKoZ28JIpUFJCiAg==" length="3874071" />
+    </item>
   </channel>
 </rss>

@@ -99,7 +99,8 @@ fi
 echo "→ Tagging $TAG"
 git -C "$ROOT" commit -q -m "Release Stash for Mac $VERSION" -- "$PROJECT/project.pbxproj"
 git -C "$ROOT" tag "$TAG"
-git -C "$ROOT" push -q --follow-tags
+# Push the tag by name: --follow-tags skips lightweight tags like this one.
+git -C "$ROOT" push -q origin HEAD "refs/tags/$TAG"
 
 echo "→ Uploading"
 gh release create "$TAG" "$ZIP" --repo "$REPO" --verify-tag --title "Stash for Mac $VERSION" --notes "$NOTES"
