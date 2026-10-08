@@ -3,7 +3,7 @@
 A private visual library for X posts. Save a post from Chrome with one click, then browse
 everything you saved in a native macOS gallery.
 
-[![Stash demo: saving a post on X and finding it in the Mac app](docs/demo-poster.png)](docs/demo.mov)
+[![Stash for Mac: a masonry gallery of saved X posts with collections in the sidebar and the post inspector open](docs/screenshot.png)](docs/demo.mov)
 
 ▶ [Watch the demo](docs/demo.mov) (19 s): save a post on X, then find it in the Mac app.
 
