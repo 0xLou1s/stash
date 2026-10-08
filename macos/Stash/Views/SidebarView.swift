@@ -5,6 +5,8 @@ struct SidebarView: View {
     @Binding var selection: SidebarItem?
     @State private var showsCollections = true
     @State private var showsAuthors = false
+    @State private var renamingCollectionID: BookmarkCollection.ID?
+    @State private var collectionPendingDeletion: BookmarkCollection?
 
     var body: some View {
         List(selection: $selection) {
@@ -22,8 +24,27 @@ struct SidebarView: View {
 
             Section("Collections", isExpanded: $showsCollections) {
                 ForEach(store.collections) { collection in
-                    row(collection.name, systemImage: "rectangle.stack", item: .collection(id: collection.id))
+                    CollectionRow(collection: collection, renamingID: $renamingCollectionID)
+                        .tag(SidebarItem.collection(id: collection.id))
+                        .contextMenu {
+                            Button("Rename") {
+                                renamingCollectionID = collection.id
+                            }
+                            Button("Delete Collection…", role: .destructive) {
+                                collectionPendingDeletion = collection
+                            }
+                        }
+                        .dropDestination(for: String.self) { bookmarkIDs, _ in
+                            add(bookmarkIDs, to: collection)
+                        }
                 }
+
+                Button(action: createCollection) {
+                    Label("New Collection", systemImage: "plus")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
 
             if !store.authors.isEmpty {
@@ -41,11 +62,94 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .confirmationDialog(
+            "Delete “\(collectionPendingDeletion?.name ?? "")”?",
+            isPresented: Binding(
+                get: { collectionPendingDeletion != nil },
+                set: { if !$0 { collectionPendingDeletion = nil } }
+            ),
+            presenting: collectionPendingDeletion
+        ) { collection in
+            Button("Delete Collection", role: .destructive) {
+                delete(collection)
+            }
+        } message: { _ in
+            Text("Posts in this collection stay in your library.")
+        }
     }
 
     private func row(_ title: String, systemImage: String, item: SidebarItem) -> some View {
         Label(title, systemImage: systemImage)
             .badge(store.count(in: item))
             .tag(item)
+    }
+
+    private func createCollection() {
+        showsCollections = true
+        Task {
+            guard let collection = await store.createCollection() else { return }
+            selection = .collection(id: collection.id)
+            renamingCollectionID = collection.id
+        }
+    }
+
+    private func delete(_ collection: BookmarkCollection) {
+        if selection == .collection(id: collection.id) {
+            selection = .all
+        }
+        Task { await store.deleteCollection(collection.id) }
+    }
+
+    private func add(_ bookmarkIDs: [String], to collection: BookmarkCollection) -> Bool {
+        let known = bookmarkIDs.filter { store.bookmark(id: $0) != nil }
+        guard !known.isEmpty else { return false }
+        Task {
+            for id in known {
+                await store.setCollection(collection.id, included: true, for: id)
+            }
+        }
+        return true
+    }
+}
+
+/// A collection in the sidebar; turns into a text field while being renamed.
+private struct CollectionRow: View {
+    @Environment(BookmarkStore.self) private var store
+    let collection: BookmarkCollection
+    @Binding var renamingID: BookmarkCollection.ID?
+
+    @State private var draft = ""
+    @FocusState private var isEditing: Bool
+
+    var body: some View {
+        if renamingID == collection.id {
+            Label {
+                TextField("Collection Name", text: $draft)
+                    .focused($isEditing)
+                    .onSubmit(commit)
+                    .onExitCommand { renamingID = nil }
+            } icon: {
+                Image(systemName: "rectangle.stack")
+            }
+            .task {
+                draft = collection.name
+                isEditing = true
+            }
+            .onChange(of: isEditing) {
+                if !isEditing { commit() }
+            }
+        } else {
+            Label(collection.name, systemImage: "rectangle.stack")
+                .badge(store.count(in: .collection(id: collection.id)))
+        }
+    }
+
+    private func commit() {
+        guard renamingID == collection.id else { return }
+        renamingID = nil
+
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != collection.name else { return }
+        Task { await store.renameCollection(collection.id, to: name) }
     }
 }

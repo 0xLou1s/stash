@@ -8,8 +8,8 @@ struct GalleryView: View {
     @AppStorage("gallerySort") private var sortOrder: GallerySortOrder = .newestSaved
 
     let bookmarks: [Bookmark]
+    let scope: SidebarItem
     let isSearching: Bool
-    let isTrash: Bool
     @Binding var selection: Bookmark.ID?
 
     var body: some View {
@@ -44,16 +44,36 @@ struct GalleryView: View {
             if bookmarks.isEmpty && !store.isLoading {
                 if isSearching {
                     ContentUnavailableView.search
-                } else if isTrash {
-                    ContentUnavailableView("Trash Is Empty", systemImage: "trash")
                 } else {
-                    ContentUnavailableView(
-                        "Nothing Here Yet",
-                        systemImage: "photo.on.rectangle",
-                        description: Text("Save posts from X with the Stash button and they show up here.")
-                    )
+                    emptyState
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        switch scope {
+        case .trash:
+            ContentUnavailableView("Trash Is Empty", systemImage: "trash")
+        case .inbox:
+            ContentUnavailableView(
+                "Inbox Is Empty",
+                systemImage: "tray",
+                description: Text("Posts that aren't in a collection show up here.")
+            )
+        case .collection:
+            ContentUnavailableView(
+                "No Posts in This Collection",
+                systemImage: "rectangle.stack",
+                description: Text("Drag posts onto the collection in the sidebar, or right-click a post and choose Add to Collection.")
+            )
+        case .all, .author:
+            ContentUnavailableView(
+                "Nothing Here Yet",
+                systemImage: "photo.on.rectangle",
+                description: Text("Save posts from X with the Stash button and they show up here.")
+            )
         }
     }
 
@@ -62,5 +82,6 @@ struct GalleryView: View {
             .onTapGesture(count: 2) { openURL(bookmark.url) }
             .onTapGesture { selection = bookmark.id }
             .contextMenu { BookmarkActions(bookmark: bookmark) }
+            .draggable(bookmark.id)
     }
 }

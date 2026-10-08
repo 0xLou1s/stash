@@ -81,6 +81,51 @@ final class BookmarkStore {
         }
     }
 
+    /// Creates an empty collection with a placeholder name, ready to be renamed.
+    func createCollection() async -> BookmarkCollection? {
+        let taken = Set(collections.map(\.name))
+        var name = "New Collection"
+        var suffix = 2
+        while taken.contains(name) {
+            name = "New Collection \(suffix)"
+            suffix += 1
+        }
+
+        do {
+            let collection = try await service.createCollection(named: name)
+            collections.append(collection)
+            return collection
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func renameCollection(_ id: BookmarkCollection.ID, to name: String) async {
+        guard var updated = collections.first(where: { $0.id == id }) else { return }
+        updated.name = name
+        do {
+            try await service.updateCollection(updated)
+            if let index = collections.firstIndex(where: { $0.id == id }) {
+                collections[index] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteCollection(_ id: BookmarkCollection.ID) async {
+        do {
+            try await service.deleteCollection(id: id)
+            collections.removeAll { $0.id == id }
+            for index in bookmarks.indices {
+                bookmarks[index].collectionIDs.remove(id)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func update(_ id: Bookmark.ID, _ change: (inout Bookmark) -> Void) async {
         guard var updated = bookmark(id: id) else { return }
         change(&updated)

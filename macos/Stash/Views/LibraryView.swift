@@ -15,8 +15,8 @@ struct LibraryView: View {
         } detail: {
             GalleryView(
                 bookmarks: store.bookmarks(in: sidebarSelection ?? .all, matching: searchText),
+                scope: sidebarSelection ?? .all,
                 isSearching: !searchText.isEmpty,
-                isTrash: sidebarSelection == .trash,
                 selection: $selection
             )
             .navigationTitle(title)
