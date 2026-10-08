@@ -6,6 +6,22 @@
     <description>Updates for Stash for Mac. Written by scripts/release-mac.sh; installed copies read it.</description>
     <language>en</language>
     <item>
+      <title>Version 0.1.2</title>
+      <pubDate>Thu, 08 Oct 2026 18:53:36 GMT</pubDate>
+      <sparkle:version>10</sparkle:version>
+      <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[Security and reliability fixes.
+
+- Fixed a crash when the app received a malformed request from the extension bridge
+- Only posts that link to X are accepted from the extension, and only X links are opened
+- A library saved by a newer version of Stash now opens read-only instead of being set aside
+- Saves from the extension can no longer get lost when two happen at once
+- No more repeated alerts when a save from the extension fails
+- Gallery posts can now be read and opened with VoiceOver]]></description>
+      <enclosure url="https://github.com/0xLou1s/stash/releases/download/mac-v0.1.2/Stash-0.1.2.zip" type="application/octet-stream" sparkle:edSignature="G738iDJh/b4t6gO4aMiW+52c5xFGdvnBZvlqHwoT2aB/31PHIo++hpsbzTl7INVleQY/bryh637rzpfYFZWNAA==" length="3918357" />
+    </item>
+    <item>
       <title>Version 0.1.1</title>
       <pubDate>Thu, 08 Oct 2026 18:14:19 GMT</pubDate>
       <sparkle:version>9</sparkle:version>
