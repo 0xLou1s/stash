@@ -1,4 +1,4 @@
-import type { Media } from "./bookmarks"
+import type { Media, MediaKind } from "./bookmarks"
 
 /** `source` tag on window messages from the page-world media capture script. */
 export const CAPTURED_MEDIA_MESSAGE = "stash:captured-media"
@@ -73,15 +73,59 @@ function toMedia(raw: RawMedia): Media | null {
   }
 }
 
+/** True for https URLs on twimg.com, X's media CDN. */
+export function isXMediaURL(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === "https:" && (hostname === "twimg.com" || hostname.endsWith(".twimg.com"))
+  } catch {
+    return false
+  }
+}
+
 /** Accepts only media that points at X's own CDNs, since any page script can post messages. */
 export function isTrustedMedia(media: Media): boolean {
-  return [media.url, media.posterURL].every((url) => {
-    if (url === null) return true
-    try {
-      const { protocol, hostname } = new URL(url)
-      return protocol === "https:" && hostname.endsWith(".twimg.com")
-    } catch {
-      return false
-    }
-  })
+  return isXMediaURL(media.url) && (media.posterURL === null || isXMediaURL(media.posterURL))
+}
+
+const MEDIA_KINDS: readonly string[] = ["photo", "video", "gif"] satisfies MediaKind[]
+
+/**
+ * Rebuilds a captured-media message field by field. It arrives through
+ * window.postMessage, so anything on the page could have sent it: unknown
+ * fields are dropped, and malformed or untrusted media are skipped.
+ */
+export function readCapturedMedia(data: unknown): Map<string, Media[]> {
+  const result = new Map<string, Media[]>()
+  const message = data as Partial<CapturedMediaMessage> | null
+  if (message?.source !== CAPTURED_MEDIA_MESSAGE || typeof message.media !== "object" || message.media === null) {
+    return result
+  }
+
+  for (const [id, items] of Object.entries(message.media)) {
+    if (!/^\d+$/.test(id) || !Array.isArray(items)) continue
+    const media = items.map(readMedia).filter((item): item is Media => item !== null && isTrustedMedia(item))
+    if (media.length > 0) result.set(id, media)
+  }
+  return result
+}
+
+function readMedia(raw: unknown): Media | null {
+  const item = raw as Record<string, unknown> | null
+  if (typeof item !== "object" || item === null) return null
+  if (typeof item.kind !== "string" || !MEDIA_KINDS.includes(item.kind)) return null
+  if (typeof item.url !== "string") return null
+  if (item.posterURL !== null && typeof item.posterURL !== "string") return null
+
+  return {
+    kind: item.kind as MediaKind,
+    url: item.url,
+    posterURL: item.posterURL as string | null,
+    width: dimension(item.width),
+    height: dimension(item.height),
+  }
+}
+
+function dimension(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
 }

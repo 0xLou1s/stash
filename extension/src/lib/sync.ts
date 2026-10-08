@@ -20,6 +20,20 @@ export const syncStatusItem = storage.defineItem<SyncStatus>("local:syncStatus",
   fallback: { reachable: false, lastAttemptAt: null, lastSyncedAt: null },
 })
 
+export type SyncState = "waiting" | "synced" | "local"
+
+/** What to tell the user about sync, given the queue size and the last attempt. */
+export function describeSync(pendingCount: number, status: SyncStatus): { state: SyncState; message: string } {
+  if (pendingCount > 0) {
+    const changes = pendingCount === 1 ? "1 change" : `${pendingCount} changes`
+    return { state: "waiting", message: `${changes} waiting. Open Stash on your Mac to sync.` }
+  }
+  if (status.reachable) {
+    return { state: "synced", message: "Synced with Stash for Mac" }
+  }
+  return { state: "local", message: "Saved in this browser. Open Stash on your Mac to sync." }
+}
+
 type Delivery = "delivered" | "rejected" | "unreachable"
 
 let running: Promise<void> | null = null
@@ -40,6 +54,11 @@ async function drainQueue(): Promise<void> {
       await recordAttempt(true)
       return
     }
+    if (!(await isStashListening())) {
+      // The app isn't running (or something else has the port). Try again later.
+      await recordAttempt(false)
+      return
+    }
 
     for (const [id, change] of pending) {
       const result = await deliver(id, change)
@@ -53,6 +72,17 @@ async function drainQueue(): Promise<void> {
       }
       await markDelivered(id, change)
     }
+  }
+}
+
+/** Whether the Stash app (not some other program on the same port) is answering. */
+async function isStashListening(): Promise<boolean> {
+  try {
+    const response = await fetch(`${APP_URL}/health`)
+    const body = response.ok ? ((await response.json()) as { app?: unknown }) : null
+    return body?.app === "Stash"
+  } catch {
+    return false
   }
 }
 
@@ -77,8 +107,9 @@ async function deliver(id: string, change: PendingChange): Promise<Delivery> {
   }
 
   if (response.ok) return "delivered"
-  // 4xx means this change will never be accepted as is; retrying won't help.
-  return response.status >= 400 && response.status < 500 ? "rejected" : "unreachable"
+  // 400: the app read this change and refused it (e.g. a link not on X).
+  // Retrying won't help. Anything else may be temporary, so keep it queued.
+  return response.status === 400 ? "rejected" : "unreachable"
 }
 
 async function recordAttempt(reachable: boolean): Promise<void> {

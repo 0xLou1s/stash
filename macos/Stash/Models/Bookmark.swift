@@ -67,12 +67,70 @@ extension Bookmark {
         url = try container.decode(URL.self, forKey: .url)
         author = try container.decode(Author.self, forKey: .author)
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
-        media = try container.decodeIfPresent([Media].self, forKey: .media) ?? []
+        // Skip media this version doesn't understand (e.g. a kind added later)
+        // rather than failing the whole post. Adding a kind must also bump
+        // LibrarySnapshot.currentSchemaVersion, so older versions won't write.
+        media = try container.decodeIfPresent(SkippingFailures<Media>.self, forKey: .media)?.elements ?? []
         postedAt = try container.decode(Date.self, forKey: .postedAt)
         savedAt = try container.decode(Date.self, forKey: .savedAt)
         collectionIDs = try container.decodeIfPresent(Set<BookmarkCollection.ID>.self, forKey: .collectionIDs) ?? []
         trashedAt = try container.decodeIfPresent(Date.self, forKey: .trashedAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? savedAt
         deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+    }
+}
+
+// MARK: - Links
+
+extension Bookmark {
+    /// Whether every link points where a saved X post's should: the post on
+    /// x.com, its media and avatar on X's CDN, all over https. Posts from the
+    /// extension bridge must pass this, so the app never opens or loads an
+    /// arbitrary URL that another program slipped in.
+    var hasTrustedLinks: Bool {
+        url.isXPost
+            && (author.avatarURL?.isXMedia ?? true)
+            && media.allSatisfy { $0.url.isXMedia && ($0.posterURL?.isXMedia ?? true) }
+    }
+
+    /// The post's address, if it's safe to hand to the system to open.
+    var webURL: URL? {
+        url.isXPost ? url : nil
+    }
+}
+
+extension URL {
+    /// https://x.com/… or https://twitter.com/…
+    var isXPost: Bool {
+        scheme == "https" && ["x.com", "twitter.com", "www.x.com", "www.twitter.com"].contains(host())
+    }
+
+    /// https on twimg.com, X's media CDN.
+    var isXMedia: Bool {
+        guard scheme == "https", let host = host() else { return false }
+        return host == "twimg.com" || host.hasSuffix(".twimg.com")
+    }
+}
+
+/// Decodes an array, dropping elements that fail to decode instead of failing the array.
+private struct SkippingFailures<Element: Decodable>: Decodable {
+    let elements: [Element]
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var elements: [Element] = []
+        while !container.isAtEnd {
+            if let element = try? container.decode(Element.self) {
+                elements.append(element)
+            } else {
+                // A failed decode doesn't advance the container; step past the element.
+                _ = try container.decode(Skipped.self)
+            }
+        }
+        self.elements = elements
+    }
+
+    private struct Skipped: Decodable {
+        init(from decoder: Decoder) throws {}
     }
 }

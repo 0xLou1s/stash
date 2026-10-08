@@ -2,6 +2,10 @@ import SwiftUI
 
 @main
 struct StashApp: App {
+    /// True when the app is only hosting the unit tests: then it neither checks
+    /// for updates nor listens for the extension.
+    static let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     @State private var store: BookmarkStore
     @State private var bridge: ExtensionBridge
     @State private var updater = Updater()
@@ -25,7 +29,7 @@ struct StashApp: App {
                 .task {
                     await store.load()
                     // Only after loading, so posts from the extension merge with what's on disk.
-                    bridge.start()
+                    if !Self.isHostingTests { bridge.start() }
                 }
                 .onChange(of: appearance, initial: true) {
                     NSApp.appearance = appearance.nsAppearance

@@ -62,7 +62,7 @@ struct BookmarkInspector: View {
 
             Section {
                 Button("Open on X", systemImage: "arrow.up.right.square") {
-                    openURL(bookmark.url)
+                    if let url = bookmark.webURL { openURL(url) }
                 }
             }
         }

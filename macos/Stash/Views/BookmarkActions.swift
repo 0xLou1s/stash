@@ -10,7 +10,7 @@ struct BookmarkActions: View {
 
     var body: some View {
         Button("Open on X", systemImage: "arrow.up.right.square") {
-            openURL(bookmark.url)
+            if let url = bookmark.webURL { openURL(url) }
         }
         Button("Copy Link", systemImage: "link") {
             NSPasteboard.general.clearContents()

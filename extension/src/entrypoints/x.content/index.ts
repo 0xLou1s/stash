@@ -1,26 +1,9 @@
 import "./style.css"
 
-import { getBookmarks, removeBookmark, saveBookmark, watchBookmarks, type Media } from "@/lib/bookmarks"
-import { CAPTURED_MEDIA_MESSAGE, isTrustedMedia, type CapturedMediaMessage } from "@/lib/x-media"
+import { getBookmarks, requestRemove, requestSave, watchBookmarks, type Media } from "@/lib/bookmarks"
+import { readCapturedMedia } from "@/lib/x-media"
 import { parsePost, postIdOf } from "./parse"
-
-const BUTTON_CLASS = "stash-button"
-
-const ICON_OUTLINE = `
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <rect x="3" y="4" width="18" height="4" rx="1"/>
-    <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/>
-    <path d="M10 12h4"/>
-  </svg>`
-
-const ICON_SAVED = `
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <rect x="3" y="4" width="18" height="4" rx="1" fill="currentColor"/>
-    <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/>
-    <path d="M9.5 13.5l2 2 3.5-3.5"/>
-  </svg>`
+import { BUTTON_CLASS, bookmarkSlot, createButton, insertButtonAfter, renderButton, showToast } from "./ui"
 
 /** Adds a Stash button right after X's own bookmark button on every post. */
 export default defineContentScript({
@@ -29,22 +12,13 @@ export default defineContentScript({
     const savedIds = new Set<string>()
     const capturedMedia = new Map<string, Media[]>()
 
-    ctx.addEventListener(window, "message", (event: MessageEvent<CapturedMediaMessage>) => {
-      if (event.source !== window || event.data?.source !== CAPTURED_MEDIA_MESSAGE) return
-      for (const [id, media] of Object.entries(event.data.media)) {
-        if (media.every(isTrustedMedia)) capturedMedia.set(id, media)
-      }
+    // Media details from x-media.content.ts, which reads X's own responses.
+    ctx.addEventListener(window, "message", (event: MessageEvent<unknown>) => {
+      if (event.source !== window) return
+      for (const [id, media] of readCapturedMedia(event.data)) capturedMedia.set(id, media)
     })
 
-    const render = (button: HTMLButtonElement) => {
-      const saved = savedIds.has(button.dataset.postId ?? "")
-      const label = saved ? "Remove from Stash" : "Save to Stash"
-      button.setAttribute("aria-pressed", String(saved))
-      button.setAttribute("aria-label", label)
-      button.title = label
-      button.innerHTML = saved ? ICON_SAVED : ICON_OUTLINE
-    }
-
+    const render = (button: HTMLButtonElement) => renderButton(button, savedIds.has(button.dataset.postId ?? ""))
     const renderAll = () => document.querySelectorAll<HTMLButtonElement>(`.${BUTTON_CLASS}`).forEach(render)
 
     const toggle = async (button: HTMLButtonElement) => {
@@ -53,14 +27,14 @@ export default defineContentScript({
 
       try {
         if (savedIds.has(id)) {
-          await removeBookmark(id)
+          await requestRemove(id)
           showToast("Removed from Stash")
         } else {
           // Read the post at click time: X recycles DOM nodes as you scroll.
           const article = button.closest("article")
           const bookmark = article && parsePost(article, capturedMedia.get(id))
           if (!bookmark) throw new Error("Couldn't read this post")
-          await saveBookmark(bookmark)
+          await requestSave(bookmark)
           showToast("Saved to Stash")
         }
       } catch (error) {
@@ -73,6 +47,7 @@ export default defineContentScript({
       const id = postIdOf(article)
       if (!id) return
 
+      // X reuses article elements for other posts as you scroll.
       const existing = article.querySelector<HTMLButtonElement>(`.${BUTTON_CLASS}`)
       if (existing) {
         if (existing.dataset.postId !== id) {
@@ -82,31 +57,11 @@ export default defineContentScript({
         return
       }
 
-      const bookmarkButton = article.querySelector('[data-testid="bookmark"], [data-testid="removeBookmark"]')
-      const actionBar = bookmarkButton?.closest('[role="group"]')
-      if (!bookmarkButton || !actionBar) return
-
-      // Climb to the bookmark button's direct child of the action bar,
-      // so our button becomes a sibling slot right after it.
-      let slot: Element = bookmarkButton
-      while (slot.parentElement && slot.parentElement !== actionBar) slot = slot.parentElement
-
-      const button = document.createElement("button")
-      button.type = "button"
-      button.className = BUTTON_CLASS
-      button.dataset.postId = id
-      button.addEventListener("click", (event) => {
-        // The whole article is clickable; don't let X open the post.
-        event.preventDefault()
-        event.stopPropagation()
-        void toggle(button)
-      })
+      const slot = bookmarkSlot(article)
+      if (!slot) return
+      const button = createButton(id, (button) => void toggle(button))
       render(button)
-
-      const wrapper = document.createElement("div")
-      wrapper.className = "stash-slot"
-      wrapper.append(button)
-      slot.after(wrapper)
+      insertButtonAfter(slot, button)
     }
 
     let scheduled = false
@@ -134,13 +89,3 @@ export default defineContentScript({
     ctx.onInvalidated(() => observer.disconnect())
   },
 })
-
-function showToast(message: string) {
-  document.querySelector(".stash-toast")?.remove()
-  const toast = document.createElement("div")
-  toast.className = "stash-toast"
-  toast.setAttribute("role", "status")
-  toast.textContent = message
-  document.body.append(toast)
-  setTimeout(() => toast.remove(), 2000)
-}

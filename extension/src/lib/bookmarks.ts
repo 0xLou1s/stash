@@ -1,4 +1,4 @@
-import { storage } from "#imports"
+import { browser, storage } from "#imports"
 
 // Same shape the Mac app decodes (see README "Bookmark shape").
 
@@ -38,6 +38,11 @@ export type PendingChange = "upsert" | "delete"
 // Saved posts live in chrome.storage.local, which survives browser restarts
 // and extension updates. Every change is also queued in `pendingItem` until
 // the background script delivers it (see sync.ts).
+//
+// Each change rewrites a whole map, so two writers could overwrite each
+// other's changes. Only the background script writes: the content script and
+// popup ask it to (`requestSave`, `requestRemove`), and it runs each change
+// to completion before the next (`oneAtATime`).
 const bookmarksItem = storage.defineItem<Record<string, Bookmark>>("local:bookmarks", {
   fallback: {},
 })
@@ -58,22 +63,58 @@ export function watchBookmarks(callback: (bookmarks: Bookmark[]) => void): () =>
   return bookmarksItem.watch((all) => callback(sortNewestFirst(all)))
 }
 
-export async function saveBookmark(bookmark: NewBookmark): Promise<void> {
-  const all = await bookmarksItem.getValue()
-  await bookmarksItem.setValue({
-    ...all,
-    [bookmark.id]: { ...bookmark, savedAt: new Date().toISOString() },
+// MARK: - Writes (background script only)
+
+let lastWrite: Promise<unknown> = Promise.resolve()
+
+function oneAtATime<T>(change: () => Promise<T>): Promise<T> {
+  const run = lastWrite.then(change, change)
+  lastWrite = run.catch(() => {})
+  return run
+}
+
+export function saveBookmark(bookmark: NewBookmark): Promise<void> {
+  return oneAtATime(async () => {
+    const all = await bookmarksItem.getValue()
+    await bookmarksItem.setValue({
+      ...all,
+      [bookmark.id]: { ...bookmark, savedAt: new Date().toISOString() },
+    })
+    await queueChange(bookmark.id, "upsert")
   })
-  await queueChange(bookmark.id, "upsert")
 }
 
-export async function removeBookmark(id: string): Promise<void> {
-  const { [id]: _removed, ...rest } = await bookmarksItem.getValue()
-  await bookmarksItem.setValue(rest)
-  await queueChange(id, "delete")
+export function removeBookmark(id: string): Promise<void> {
+  return oneAtATime(async () => {
+    const { [id]: _removed, ...rest } = await bookmarksItem.getValue()
+    await bookmarksItem.setValue(rest)
+    await queueChange(id, "delete")
+  })
 }
 
-// MARK: - Sync queue
+// MARK: - Asking the background script to write
+
+export type LibraryMessage =
+  | { type: "save"; bookmark: NewBookmark }
+  | { type: "remove"; id: string }
+  | { type: "sync" }
+
+export type LibraryReply = { ok: true } | { ok: false; error: string }
+
+export function requestSave(bookmark: NewBookmark): Promise<void> {
+  return send({ type: "save", bookmark })
+}
+
+export function requestRemove(id: string): Promise<void> {
+  return send({ type: "remove", id })
+}
+
+async function send(message: LibraryMessage): Promise<void> {
+  const reply = (await browser.runtime.sendMessage(message)) as LibraryReply | undefined
+  if (!reply?.ok) throw new Error(reply?.error ?? "The extension's background script didn't answer")
+}
+
+// MARK: - Sync queue (also background script only)
 
 export async function getPendingChanges(): Promise<Record<string, PendingChange>> {
   return pendingItem.getValue()
@@ -84,20 +125,24 @@ export function watchPendingChanges(callback: (pending: Record<string, PendingCh
 }
 
 /** Clears a delivered change, unless a newer one for the same post was queued meanwhile. */
-export async function markDelivered(id: string, change: PendingChange): Promise<void> {
-  const pending = await pendingItem.getValue()
-  if (pending[id] !== change) return
-  const { [id]: _delivered, ...rest } = pending
-  await pendingItem.setValue(rest)
+export function markDelivered(id: string, change: PendingChange): Promise<void> {
+  return oneAtATime(async () => {
+    const pending = await pendingItem.getValue()
+    if (pending[id] !== change) return
+    const { [id]: _delivered, ...rest } = pending
+    await pendingItem.setValue(rest)
+  })
 }
 
 /** Queues every saved post, e.g. for posts saved before sync existed. */
-export async function queueAllForSync(): Promise<void> {
-  const ids = Object.keys(await bookmarksItem.getValue())
-  const pending = await pendingItem.getValue()
-  await pendingItem.setValue({
-    ...Object.fromEntries(ids.map((id) => [id, "upsert" as const])),
-    ...pending,
+export function queueAllForSync(): Promise<void> {
+  return oneAtATime(async () => {
+    const ids = Object.keys(await bookmarksItem.getValue())
+    const pending = await pendingItem.getValue()
+    await pendingItem.setValue({
+      ...Object.fromEntries(ids.map((id) => [id, "upsert" as const])),
+      ...pending,
+    })
   })
 }
 

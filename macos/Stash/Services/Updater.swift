@@ -11,7 +11,7 @@ final class Updater {
     private(set) var canCheckForUpdates = false
 
     @ObservationIgnored private let controller = SPUStandardUpdaterController(
-        startingUpdater: true,
+        startingUpdater: !StashApp.isHostingTests,
         updaterDelegate: nil,
         userDriverDelegate: nil
     )

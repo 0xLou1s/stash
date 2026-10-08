@@ -13,7 +13,7 @@
 #   5. Uploads the zip as the GitHub release for that tag.
 #   6. Adds the release to appcast.xml (the feed installed apps check) and pushes.
 #
-# Needs Xcode, gh (logged in) and a clean working tree.
+# Needs Xcode, gh (logged in), a clean working tree, and main level with origin/main.
 set -euo pipefail
 
 VERSION="${1:?usage: scripts/release-mac.sh <version> [release-notes.md]}"
@@ -31,30 +31,40 @@ FEED="$ROOT/appcast.xml"
 PACKAGES="$ROOT/macos/.build/SourcePackages"
 WORK="$(mktemp -d)"
 
-if [[ -n "$DRY_RUN" ]]; then
-  # Leave the project exactly as it was.
-  cp "$PROJECT/project.pbxproj" "$WORK/project.pbxproj.orig"
-  trap 'cp "$WORK/project.pbxproj.orig" "$PROJECT/project.pbxproj"; rm -rf "$WORK"' EXIT
-else
-  trap 'rm -rf "$WORK"' EXIT
-  if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
-    echo "Commit or stash your changes first; the release commit should only bump the version." >&2
-    exit 1
-  fi
-  if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    echo "$TAG already exists." >&2
-    exit 1
-  fi
+fail() {
+  echo "$1" >&2
+  exit 1
+}
+
+# Until the version bump is committed, any exit (dry run, failed build, Ctrl-C)
+# puts the project file back the way it was.
+COMMITTED=""
+cp "$PROJECT/project.pbxproj" "$WORK/project.pbxproj.orig"
+trap '[[ -z "$COMMITTED" ]] && cp "$WORK/project.pbxproj.orig" "$PROJECT/project.pbxproj"; rm -rf "$WORK"' EXIT
+
+if [[ -z "$DRY_RUN" ]]; then
+  [[ -z "$(git -C "$ROOT" status --porcelain)" ]] ||
+    fail "Commit or stash your changes first; the release commit should only bump the version."
+  [[ "$(git -C "$ROOT" branch --show-current)" == "main" ]] ||
+    fail "Release from main: installed apps read the update feed from main."
+  git -C "$ROOT" fetch -q origin main
+  [[ "$(git -C "$ROOT" rev-parse HEAD)" == "$(git -C "$ROOT" rev-parse origin/main)" ]] ||
+    fail "main isn't level with origin/main. Pull or push first."
+  ! git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null ||
+    fail "$TAG already exists."
 fi
 
 NOTES="Stash $VERSION"
 if [[ -n "$NOTES_FILE" ]]; then
   NOTES="$(cat "$NOTES_FILE")"
 fi
+# The notes go inside a CDATA section in the feed; this would end it early.
+[[ "$NOTES" != *"]]>"* ]] || fail "Release notes can't contain ']]>'."
 
-# Sparkle decides what's newer by the build number, so it has to keep going up.
-# The commit count (plus this release's own commit) does.
-BUILD="$(( $(git -C "$ROOT" rev-list --count HEAD) + 1 ))"
+# Sparkle decides what's newer by the build number, so it must always go up.
+# Take it from the feed itself: one more than the highest build ever published.
+LAST_BUILD="$(grep -o '<sparkle:version>[0-9]*' "$FEED" | grep -o '[0-9]*$' | sort -n | tail -1 || true)"
+BUILD="$(( ${LAST_BUILD:-0} + 1 ))"
 echo "→ Stash $VERSION (build $BUILD)"
 
 sed -i '' -E \
@@ -98,9 +108,11 @@ fi
 
 echo "→ Tagging $TAG"
 git -C "$ROOT" commit -q -m "Release Stash for Mac $VERSION" -- "$PROJECT/project.pbxproj"
+COMMITTED=1
 git -C "$ROOT" tag "$TAG"
-# Push the tag by name: --follow-tags skips lightweight tags like this one.
-git -C "$ROOT" push -q origin HEAD "refs/tags/$TAG"
+# Branch and tag land together or not at all. The tag is pushed by name:
+# --follow-tags skips lightweight tags like this one.
+git -C "$ROOT" push -q --atomic origin main "refs/tags/$TAG"
 
 echo "→ Uploading"
 gh release create "$TAG" "$ZIP" --repo "$REPO" --verify-tag --title "Stash for Mac $VERSION" --notes "$NOTES"
@@ -116,6 +128,6 @@ anchor = "    <item>" if "    <item>" in xml else "  </channel>"
 open(path, "w").write(xml.replace(anchor, item + "\n" + anchor, 1))
 PY
 git -C "$ROOT" commit -q -m "Add Stash for Mac $VERSION to the update feed" -- "$FEED"
-git -C "$ROOT" push -q
+git -C "$ROOT" push -q origin main
 
 echo "✓ Stash $VERSION is out: https://github.com/$REPO/releases/tag/$TAG"

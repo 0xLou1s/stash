@@ -11,45 +11,71 @@ struct GalleryControls: View {
             LayoutSwitcher(selection: $layoutStyle)
                 .floatingBackground(in: Capsule())
 
-            HStack(spacing: 10) {
+            HStack {
                 Spacer()
-
-                HStack(spacing: 8) {
-                    Image(systemName: "plus.magnifyingglass")
-                    Slider(value: $scale, in: 0.6...2)
-                        .controlSize(.mini)
-                        .frame(width: 100)
-                        .accessibilityLabel("Zoom")
-                    Text("×\(scale.formatted(.number.precision(.fractionLength(1))))")
-                        .monospacedDigit()
-                        .frame(width: 30, alignment: .leading)
-                }
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .floatingBackground(in: Capsule())
-
-                Menu {
-                    Picker("Sort By", selection: $sortOrder) {
-                        ForEach(GallerySortOrder.allCases) { order in
-                            Text(order.title).tag(order)
-                        }
+                GlassGroup(spacing: 10) {
+                    HStack(spacing: 10) {
+                        zoom
+                        sortMenu
                     }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label("Sort", systemImage: "line.3.horizontal.decrease")
-                        .labelStyle(.iconOnly)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .frame(width: 34, height: 34)
-                .floatingBackground(in: Circle())
-                .help("Sort")
             }
         }
         .padding(.horizontal, 16)
+    }
+
+    private var zoom: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus.magnifyingglass")
+                .accessibilityHidden(true)
+            Slider(value: $scale, in: 0.6...2)
+                .controlSize(.mini)
+                .frame(width: 100)
+                .accessibilityLabel("Zoom")
+            Text("×\(scale.formatted(.number.precision(.fractionLength(1))))")
+                .monospacedDigit()
+                .frame(width: 30, alignment: .leading)
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .floatingBackground(in: Capsule())
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort By", selection: $sortOrder) {
+                ForEach(GallerySortOrder.allCases) { order in
+                    Text(order.title).tag(order)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Sort", systemImage: "line.3.horizontal.decrease")
+                .labelStyle(.iconOnly)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(width: 34, height: 34)
+        .floatingBackground(in: Circle())
+        .help("Sort")
+    }
+}
+
+/// Groups neighbouring glass so the pieces share one backdrop and render
+/// consistently; glass can't sample other glass across separate containers.
+private struct GlassGroup<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            GlassEffectContainer(spacing: spacing) { content }
+        } else {
+            content
+        }
     }
 }
 
@@ -96,7 +122,8 @@ private extension View {
     @ViewBuilder
     func floatingBackground(in shape: some Shape) -> some View {
         if #available(macOS 26, *) {
-            glassEffect(.regular, in: shape)
+            // Interactive: every floating piece is a control.
+            glassEffect(.regular.interactive(), in: shape)
         } else {
             background(.regularMaterial, in: shape)
                 .overlay { shape.stroke(Color(nsColor: .separatorColor), lineWidth: 0.5) }

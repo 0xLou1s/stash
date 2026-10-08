@@ -8,8 +8,9 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useBookmarks } from "@/hooks/use-bookmarks"
 import { useSyncStatus } from "@/hooks/use-sync-status"
-import { removeBookmark, type Bookmark, type Media } from "@/lib/bookmarks"
+import { requestRemove, type Bookmark, type LibraryMessage, type Media } from "@/lib/bookmarks"
 import { timeAgo } from "@/lib/format"
+import { describeSync, type SyncState } from "@/lib/sync"
 
 export default function App() {
   const bookmarks = useBookmarks()
@@ -17,7 +18,7 @@ export default function App() {
 
   // Try delivering anything queued as soon as the popup opens.
   useEffect(() => {
-    void browser.runtime.sendMessage({ type: "sync" }).catch(() => {})
+    void browser.runtime.sendMessage({ type: "sync" } satisfies LibraryMessage).catch(() => {})
   }, [])
 
   const results = useMemo(() => {
@@ -127,7 +128,7 @@ function BookmarkRow({ bookmark }: { bookmark: Bookmark }) {
             variant="secondary"
             size="icon"
             className="absolute top-2.5 right-3 size-7 opacity-0 shadow-sm group-hover:opacity-100 focus-visible:opacity-100"
-            onClick={() => void removeBookmark(bookmark.id)}
+            onClick={() => void requestRemove(bookmark.id)}
             aria-label="Remove from Stash"
           >
             <Trash2 />
@@ -163,23 +164,20 @@ function SyncFooter() {
   const sync = useSyncStatus()
   if (!sync) return null
 
-  const { pendingCount, status } = sync
-  const [tone, message] =
-    pendingCount > 0
-      ? [
-          "bg-amber-500",
-          `${pendingCount === 1 ? "1 change" : `${pendingCount} changes`} waiting. Open Stash on your Mac to sync.`,
-        ]
-      : status.reachable
-        ? ["bg-emerald-500", "Synced with Stash for Mac"]
-        : ["bg-muted-foreground/50", "Saved in this browser. Open Stash on your Mac to sync."]
+  const { state, message } = describeSync(sync.pendingCount, sync.status)
 
   return (
     <footer className="flex items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground" role="status">
-      <span className={`size-1.5 shrink-0 rounded-full ${tone}`} aria-hidden />
+      <span className={`size-1.5 shrink-0 rounded-full ${syncDotColor[state]}`} aria-hidden />
       {message}
     </footer>
   )
+}
+
+const syncDotColor: Record<SyncState, string> = {
+  waiting: "bg-amber-500",
+  synced: "bg-emerald-500",
+  local: "bg-muted-foreground/50",
 }
 
 function EmptyLibrary() {

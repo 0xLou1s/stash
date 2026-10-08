@@ -101,7 +101,7 @@ struct LibraryView: View {
         case .collection(let id):
             store.collections.first { $0.id == id }?.name ?? "Collection"
         case .author(let handle):
-            store.authors.first { $0.id == handle }?.author.name ?? "@\(handle)"
+            store.library.first { $0.author.handle == handle }?.author.name ?? "@\(handle)"
         }
     }
 }

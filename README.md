@@ -44,6 +44,12 @@ production build). Pin **Stash for X** from the puzzle-piece menu.
 **4. Save a post.** Click the Stash button under any post on x.com. It shows up in the Mac app
 within a few seconds while the app is running, or the next time you open it.
 
+**Tests.** `pnpm test` in `extension/` (Vitest), and for the Mac app:
+
+```sh
+xcodebuild test -project macos/Stash.xcodeproj -scheme Stash -destination 'platform=macOS'
+```
+
 ## How it fits together
 
 ```
@@ -129,8 +135,10 @@ uploads the zip as that tag's GitHub release, and only then adds it to `appcast.
 
 - **Signing key.** Updates are signed with an EdDSA key kept in your login Keychain
   (account `stash`); the app has the matching public key in `macos/Stash-Info.plist` and
-  refuses anything else. Back it up with Sparkle's `generate_keys --account stash -x key.txt`
-  and keep that file somewhere safe: without the key, installed copies can't be updated.
+  refuses anything else. Back it up with Sparkle's
+  `generate_keys --account stash -x ~/stash-sparkle-key.txt` (outside this public repo) and
+  keep that file somewhere safe, like a password manager: without it, installed copies can't
+  be updated. `.gitignore` blocks `*.key` and `*sparkle-key*` as a backstop.
 - **First install.** The app isn't signed with an Apple Developer ID yet, so the first time
   someone opens a downloaded copy macOS blocks it; they allow it in System Settings ›
   Privacy & Security › Open Anyway. Updates after that install without the warning.

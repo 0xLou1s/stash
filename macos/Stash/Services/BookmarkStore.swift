@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 struct AuthorSummary: Identifiable {
     let author: Bookmark.Author
@@ -17,6 +18,7 @@ final class BookmarkStore {
     var errorMessage: String?
 
     @ObservationIgnored private let service: any BookmarkService
+    @ObservationIgnored private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Stash", category: "BookmarkStore")
 
     init(service: any BookmarkService) {
         self.service = service
@@ -47,6 +49,9 @@ final class BookmarkStore {
 
     // MARK: - From the extension
 
+    // These report failure to the caller (the extension retries) instead of
+    // through `errorMessage`, which would raise an alert on every retry.
+
     /// A post saved in the browser. Saving again refreshes its content and
     /// brings it back from Trash, but keeps its collections and first save date.
     @discardableResult
@@ -61,13 +66,10 @@ final class BookmarkStore {
         merged.updatedAt = .now
 
         do {
-            try await service.saveBookmark(merged)
-            bookmarks.removeAll { $0.id == merged.id }
-            bookmarks.append(merged)
-            bookmarks.sort { $0.savedAt > $1.savedAt }
+            try await persist(merged)
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            logger.error("Couldn't save post \(incoming.id, privacy: .public) from the extension: \(error, privacy: .public)")
             return false
         }
     }
@@ -75,8 +77,16 @@ final class BookmarkStore {
     /// A post removed in the browser. It goes to Trash rather than vanishing.
     @discardableResult
     func ingestRemoval(id: Bookmark.ID) async -> Bool {
-        guard let existing = bookmark(id: id), !existing.isTrashed else { return true }
-        return await update(id) { $0.trashedAt = .now }
+        guard var trashed = bookmark(id: id), !trashed.isTrashed else { return true }
+        trashed.trashedAt = .now
+        trashed.updatedAt = .now
+        do {
+            try await persist(trashed)
+            return true
+        } catch {
+            logger.error("Couldn't trash post \(id, privacy: .public) removed in the extension: \(error, privacy: .public)")
+            return false
+        }
     }
 
     // MARK: - Changes
@@ -171,15 +181,23 @@ final class BookmarkStore {
         change(&updated)
         updated.updatedAt = .now
         do {
-            try await service.saveBookmark(updated)
-            if let index = bookmarks.firstIndex(where: { $0.id == id }) {
-                bookmarks[index] = updated
-            }
+            try await persist(updated)
             return true
         } catch {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    /// Saves to disk, then mirrors the change in memory (newest saved first).
+    private func persist(_ bookmark: Bookmark) async throws {
+        try await service.saveBookmark(bookmark)
+        if let index = bookmarks.firstIndex(where: { $0.id == bookmark.id }) {
+            bookmarks[index] = bookmark
+        } else {
+            bookmarks.append(bookmark)
+        }
+        bookmarks.sort { $0.savedAt > $1.savedAt }
     }
 
     // MARK: - Queries
@@ -215,7 +233,23 @@ final class BookmarkStore {
         }
     }
 
-    func count(in item: SidebarItem) -> Int {
-        bookmarks(in: item, matching: "").count
+    /// How many posts each sidebar item holds, in one pass over the library.
+    /// Items with no posts are absent; read with `counts[item, default: 0]`.
+    var sidebarCounts: [SidebarItem: Int] {
+        var counts: [SidebarItem: Int] = [:]
+        for bookmark in bookmarks {
+            guard !bookmark.isTrashed else {
+                counts[.trash, default: 0] += 1
+                continue
+            }
+            counts[.all, default: 0] += 1
+            if bookmark.collectionIDs.isEmpty {
+                counts[.inbox, default: 0] += 1
+            }
+            for id in bookmark.collectionIDs {
+                counts[.collection(id: id), default: 0] += 1
+            }
+        }
+        return counts
     }
 }

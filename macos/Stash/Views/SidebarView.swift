@@ -9,22 +9,30 @@ struct SidebarView: View {
     @State private var collectionPendingDeletion: BookmarkCollection?
 
     var body: some View {
+        // Worked out once per update rather than once per row.
+        let counts = store.sidebarCounts
+        let authors = store.authors
+
         List(selection: $selection) {
             Section {
-                row("All", systemImage: "square.grid.2x2", item: .all)
-                row("Inbox", systemImage: "tray", item: .inbox)
-                row("Trash", systemImage: "trash", item: .trash)
+                row("All", systemImage: "square.grid.2x2", item: .all, counts: counts)
+                row("Inbox", systemImage: "tray", item: .inbox, counts: counts)
+                row("Trash", systemImage: "trash", item: .trash, counts: counts)
                     .contextMenu {
                         Button("Empty Trash", role: .destructive) {
                             Task { await store.emptyTrash() }
                         }
-                        .disabled(store.count(in: .trash) == 0)
+                        .disabled(counts[.trash, default: 0] == 0)
                     }
             }
 
             Section("Collections", isExpanded: $showsCollections) {
                 ForEach(store.collections) { collection in
-                    CollectionRow(collection: collection, renamingID: $renamingCollectionID)
+                    CollectionRow(
+                        collection: collection,
+                        count: counts[.collection(id: collection.id), default: 0],
+                        renamingID: $renamingCollectionID
+                    )
                         .tag(SidebarItem.collection(id: collection.id))
                         .contextMenu {
                             Button("Rename") {
@@ -47,9 +55,9 @@ struct SidebarView: View {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             }
 
-            if !store.authors.isEmpty {
+            if !authors.isEmpty {
                 Section("Authors", isExpanded: $showsAuthors) {
-                    ForEach(store.authors) { summary in
+                    ForEach(authors) { summary in
                         Label {
                             Text(summary.author.name)
                         } icon: {
@@ -78,9 +86,9 @@ struct SidebarView: View {
         }
     }
 
-    private func row(_ title: String, systemImage: String, item: SidebarItem) -> some View {
+    private func row(_ title: String, systemImage: String, item: SidebarItem, counts: [SidebarItem: Int]) -> some View {
         Label(title, systemImage: systemImage)
-            .badge(store.count(in: item))
+            .badge(counts[item, default: 0])
             .tag(item)
     }
 
@@ -116,6 +124,7 @@ struct SidebarView: View {
 private struct CollectionRow: View {
     @Environment(BookmarkStore.self) private var store
     let collection: BookmarkCollection
+    let count: Int
     @Binding var renamingID: BookmarkCollection.ID?
 
     @State private var draft = ""
@@ -140,7 +149,7 @@ private struct CollectionRow: View {
             }
         } else {
             Label(collection.name, systemImage: "rectangle.stack")
-                .badge(store.count(in: .collection(id: collection.id)))
+                .badge(count)
         }
     }
 

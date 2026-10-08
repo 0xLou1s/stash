@@ -12,3 +12,7 @@ node_modules/
 
 # Swift packages checked out by scripts/release-mac.sh
 .build/
+
+# Never commit a Sparkle signing key export (this repo is public)
+*.key
+*sparkle-key*

@@ -85,9 +85,34 @@ struct GalleryView: View {
 
     private func interactive(_ content: some View, for bookmark: Bookmark) -> some View {
         content
-            .onTapGesture(count: 2) { openURL(bookmark.url) }
-            .onTapGesture { selection = selection == bookmark.id ? nil : bookmark.id }
+            .onTapGesture(count: 2) { if let url = bookmark.webURL { openURL(url) } }
+            .onTapGesture { toggleSelection(of: bookmark) }
             .contextMenu { BookmarkActions(bookmark: bookmark) }
             .draggable(bookmark.id)
+            // Tap gestures are invisible to VoiceOver, so describe the tile and
+            // offer the same two actions (select, open) explicitly.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel(for: bookmark))
+            .accessibilityAddTraits(selection == bookmark.id ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityAction { toggleSelection(of: bookmark) }
+            .accessibilityAction(named: "Open on X") { if let url = bookmark.webURL { openURL(url) } }
+    }
+
+    /// Clicking the selected post again deselects it, which closes the inspector.
+    private func toggleSelection(of bookmark: Bookmark) {
+        selection = selection == bookmark.id ? nil : bookmark.id
+    }
+
+    private func accessibilityLabel(for bookmark: Bookmark) -> String {
+        let media: String? = switch (bookmark.media.first?.kind, bookmark.media.count) {
+        case (nil, _): nil
+        case (.photo?, 1): "photo"
+        case (.photo?, let count): "\(count) photos"
+        case (.video?, _): "video"
+        case (.gif?, _): "GIF"
+        }
+        return [bookmark.author.name, media, bookmark.text.isEmpty ? nil : bookmark.text]
+            .compactMap(\.self)
+            .joined(separator: ", ")
     }
 }

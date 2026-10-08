@@ -1,4 +1,5 @@
 import type { Media, NewBookmark } from "@/lib/bookmarks"
+import { isTrustedMedia, isXMediaURL } from "@/lib/x-media"
 
 // X's class names are generated, so everything here keys off data-testid.
 
@@ -9,7 +10,8 @@ export function postIdOf(article: HTMLElement): string | null {
 /**
  * Reads a post out of its <article>. `captured` is media from X's own API
  * responses when we have it; otherwise media is read from the DOM, which
- * only exposes still images (videos play from blob: URLs).
+ * only exposes still images (videos play from blob: URLs). Media and the
+ * avatar are kept only if they point at X's CDN, whichever source they came from.
  */
 export function parsePost(article: HTMLElement, captured: Media[] | undefined): NewBookmark | null {
   const timestamp = timestampLink(article)
@@ -25,14 +27,18 @@ export function parsePost(article: HTMLElement, captured: Media[] | undefined): 
     author: {
       name: nameBlock?.querySelector("span")?.textContent?.trim() || handle,
       handle,
-      avatarURL:
-        outsideQuote(article.querySelectorAll<HTMLImageElement>('[data-testid="Tweet-User-Avatar"] img'))[0]?.src ??
-        null,
+      avatarURL: trustedOrNull(
+        outsideQuote(article.querySelectorAll<HTMLImageElement>('[data-testid="Tweet-User-Avatar"] img'))[0]?.src,
+      ),
     },
     text: textBlock?.innerText ?? "",
-    media: captured ?? mediaFromDOM(article),
+    media: (captured ?? mediaFromDOM(article)).filter(isTrustedMedia),
     postedAt: timestamp.time.getAttribute("datetime") ?? new Date().toISOString(),
   }
+}
+
+function trustedOrNull(url: string | undefined): string | null {
+  return url && isXMediaURL(url) ? url : null
 }
 
 /**

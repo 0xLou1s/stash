@@ -21,6 +21,11 @@ extension LibrarySnapshot {
     }
 }
 
+/// Just the format version, readable even when the rest of the file isn't.
+private struct FormatVersion: Decodable {
+    var schemaVersion: Int?
+}
+
 enum LibraryError: LocalizedError {
     case unreadable(backupURL: URL?, underlying: Error)
     case newerVersion(Int)
@@ -124,13 +129,20 @@ final class LocalBookmarkService: BookmarkService {
 
         do {
             let data = try Data(contentsOf: fileURL)
-            let loaded = try StashJSON.decoder.decode(LibrarySnapshot.self, from: data)
-            if loaded.schemaVersion > LibrarySnapshot.currentSchemaVersion {
-                // Writing would drop whatever the newer version added. Read only.
-                writeBlocker = .newerVersion(loaded.schemaVersion)
+
+            // Check the format version on its own first: a newer version's file
+            // may not decode here at all, and must not be mistaken for a broken one.
+            let version = (try? StashJSON.decoder.decode(FormatVersion.self, from: data))?.schemaVersion ?? 1
+            if version > LibrarySnapshot.currentSchemaVersion {
+                // Writing would drop whatever the newer version added. Read only,
+                // showing whatever this version can make sense of.
+                writeBlocker = .newerVersion(version)
                 pendingWarning = writeBlocker
+                snapshot = (try? StashJSON.decoder.decode(LibrarySnapshot.self, from: data)) ?? LibrarySnapshot()
+                return
             }
-            snapshot = loaded
+
+            snapshot = try StashJSON.decoder.decode(LibrarySnapshot.self, from: data)
         } catch {
             // Never overwrite a library we couldn't read. Move it aside and start fresh.
             let backupURL = fileURL.deletingLastPathComponent()

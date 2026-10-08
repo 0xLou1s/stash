@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 
 /// A tiny HTTP endpoint the Chrome extension sends saves to while the app is
 /// running. It listens on 127.0.0.1 only, and refuses changes from web pages:
@@ -11,7 +12,7 @@ import Network
 /// cloud means changing its base URL, not its sync code:
 ///
 ///     GET    /v1/health
-///     PUT    /v1/bookmarks/{id}    body: bookmark JSON
+///     PUT    /v1/bookmarks/{id}    body: bookmark JSON (links must point at X)
 ///     DELETE /v1/bookmarks/{id}
 final class ExtensionBridge {
     /// Keep in sync with `APP_URL` in extension/src/lib/sync.ts.
@@ -19,6 +20,7 @@ final class ExtensionBridge {
 
     private let store: BookmarkStore
     private var listener: NWListener?
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Stash", category: "ExtensionBridge")
 
     init(store: BookmarkStore) {
         self.store = store
@@ -36,24 +38,32 @@ final class ExtensionBridge {
             listener.newConnectionHandler = { [weak self] connection in
                 MainActor.assumeIsolated { self?.accept(connection) }
             }
-            listener.stateUpdateHandler = { state in
+            listener.stateUpdateHandler = { [logger] state in
                 if case .failed(let error) = state {
                     // Most likely another copy of Stash already has the port.
-                    print("[Stash] Extension bridge stopped: \(error)")
+                    logger.error("Extension bridge stopped: \(error, privacy: .public)")
                 }
             }
             listener.start(queue: .main)
             self.listener = listener
         } catch {
-            print("[Stash] Couldn't start the extension bridge: \(error)")
+            logger.error("Couldn't start the extension bridge: \(error, privacy: .public)")
         }
     }
 
     // MARK: - Connections
 
+    /// A request has this long to arrive in full, so idle or trickling
+    /// connections can't pile up.
+    private static let requestTimeout: Duration = .seconds(10)
+
     private func accept(_ connection: NWConnection) {
         connection.start(queue: .main)
         receive(on: connection, buffer: Data())
+        Task {
+            try? await Task.sleep(for: Self.requestTimeout)
+            connection.cancel() // No-op if the connection already finished.
+        }
     }
 
     private func receive(on connection: NWConnection, buffer: Data) {
@@ -64,43 +74,42 @@ final class ExtensionBridge {
                 var buffer = buffer
                 if let data { buffer.append(data) }
 
-                if let request = HTTPRequest(parsing: buffer) {
+                switch HTTPRequest.parse(buffer) {
+                case .complete(let request):
                     Task {
                         let response = await self.respond(to: request)
-                        connection.send(content: response.serialized(), completion: .contentProcessed { _ in
-                            connection.cancel()
-                        })
+                        Self.send(response, on: connection)
                     }
-                } else if isComplete || error != nil || buffer.count > 20_000_000 {
+                case .invalid:
+                    Self.send(HTTPResponse(status: 400), on: connection)
+                case .incomplete where isComplete || error != nil:
                     connection.cancel()
-                } else {
+                case .incomplete:
                     self.receive(on: connection, buffer: buffer)
                 }
             }
         }
     }
 
+    private static func send(_ response: HTTPResponse, on connection: NWConnection) {
+        connection.send(content: response.serialized(), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
     // MARK: - Routes
 
-    private func respond(to request: HTTPRequest) async -> HTTPResponse {
+    func respond(to request: HTTPRequest) async -> HTTPResponse {
         let origin = request.headers["origin"] ?? ""
-        let fromExtension = origin.hasPrefix("chrome-extension://")
-        var response = await route(request, trusted: fromExtension || origin.isEmpty)
-        if fromExtension {
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, PUT, DELETE, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        }
-        return response
+        // Pages always send their origin; no origin means software on this Mac.
+        // No CORS headers are sent: Stash's extension has host permission for
+        // 127.0.0.1 and doesn't need them, and sending them would let other
+        // extensions' pages through the browser's cross-origin checks.
+        return await route(request, trusted: origin.hasPrefix("chrome-extension://") || origin.isEmpty)
     }
 
     private func route(_ request: HTTPRequest, trusted: Bool) async -> HTTPResponse {
-        let path = request.path.split(separator: "?").first.map(String.init) ?? ""
-        let segments = path.split(separator: "/").map(String.init)
-
-        if request.method == "OPTIONS" {
-            return HTTPResponse(status: trusted ? 204 : 403)
-        }
+        let segments = request.pathSegments
 
         if request.method == "GET", segments == ["v1", "health"] {
             return .json(["app": "Stash", "ok": true])
@@ -112,44 +121,67 @@ final class ExtensionBridge {
         guard trusted else {
             return HTTPResponse(status: 403)
         }
-        let id = segments[2]
 
         switch request.method {
-        case "PUT":
-            guard let bookmark = try? StashJSON.decoder.decode(Bookmark.self, from: request.body),
-                  bookmark.id == id
-            else {
-                return HTTPResponse(status: 400)
-            }
-            return HTTPResponse(status: await store.ingest(bookmark) ? 204 : 500)
-
-        case "DELETE":
-            return HTTPResponse(status: await store.ingestRemoval(id: id) ? 204 : 500)
-
-        default:
-            return HTTPResponse(status: 405)
+        case "PUT": return await saveBookmark(id: segments[2], json: request.body)
+        case "DELETE": return await removeBookmark(id: segments[2])
+        default: return HTTPResponse(status: 405)
         }
+    }
+
+    private func saveBookmark(id: Bookmark.ID, json: Data) async -> HTTPResponse {
+        guard let bookmark = try? StashJSON.decoder.decode(Bookmark.self, from: json),
+              bookmark.id == id,
+              bookmark.hasTrustedLinks
+        else {
+            return HTTPResponse(status: 400)
+        }
+        return HTTPResponse(status: await store.ingest(bookmark) ? 204 : 500)
+    }
+
+    private func removeBookmark(id: Bookmark.ID) async -> HTTPResponse {
+        HTTPResponse(status: await store.ingestRemoval(id: id) ? 204 : 500)
     }
 }
 
 // MARK: - Minimal HTTP/1.1
 
-private struct HTTPRequest {
+struct HTTPRequest {
     let method: String
     let path: String
     /// Lowercased names.
     let headers: [String: String]
     let body: Data
 
-    /// Returns nil until `data` holds the full request (headers plus Content-Length bytes).
-    init?(parsing data: Data) {
-        guard let headerEnd = data.firstRange(of: Data("\r\n\r\n".utf8)),
+    /// "/v1/bookmarks/123?x=1" → ["v1", "bookmarks", "123"]
+    var pathSegments: [String] {
+        let path = path.split(separator: "?", maxSplits: 1).first ?? ""
+        return path.split(separator: "/").map(String.init)
+    }
+
+    enum ParseResult {
+        /// Keep reading.
+        case incomplete
+        case complete(HTTPRequest)
+        /// Malformed or too large; answer 400 and close.
+        case invalid
+    }
+
+    /// A bookmark is a few KB; these leave plenty of room and cap what one connection can buffer.
+    static let maxHeaderBytes = 16 * 1024
+    static let maxBodyBytes = 1024 * 1024
+
+    static func parse(_ data: Data) -> ParseResult {
+        guard let headerEnd = data.firstRange(of: Data("\r\n\r\n".utf8)) else {
+            return data.count > maxHeaderBytes ? .invalid : .incomplete
+        }
+        guard data.distance(from: data.startIndex, to: headerEnd.lowerBound) <= maxHeaderBytes,
               let head = String(data: data[data.startIndex..<headerEnd.lowerBound], encoding: .utf8)
-        else { return nil }
+        else { return .invalid }
 
         var lines = head.components(separatedBy: "\r\n")
         let requestLine = lines.removeFirst().split(separator: " ")
-        guard requestLine.count >= 2 else { return nil }
+        guard requestLine.count >= 2 else { return .invalid }
 
         var headers: [String: String] = [:]
         for line in lines {
@@ -158,18 +190,27 @@ private struct HTTPRequest {
             headers[name] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
 
-        let length = Int(headers["content-length"] ?? "") ?? 0
-        let bodyStart = headerEnd.upperBound
-        guard data.distance(from: bodyStart, to: data.endIndex) >= length else { return nil }
+        let length: Int
+        if let declared = headers["content-length"] {
+            guard let value = Int(declared), (0...maxBodyBytes).contains(value) else { return .invalid }
+            length = value
+        } else {
+            length = 0
+        }
 
-        method = String(requestLine[0])
-        path = String(requestLine[1])
-        self.headers = headers
-        body = Data(data[bodyStart..<data.index(bodyStart, offsetBy: length)])
+        let bodyStart = headerEnd.upperBound
+        guard data.distance(from: bodyStart, to: data.endIndex) >= length else { return .incomplete }
+
+        return .complete(HTTPRequest(
+            method: String(requestLine[0]),
+            path: String(requestLine[1]),
+            headers: headers,
+            body: Data(data[bodyStart..<data.index(bodyStart, offsetBy: length)])
+        ))
     }
 }
 
-private struct HTTPResponse {
+struct HTTPResponse {
     var status: Int
     var headers: [String: String] = [:]
     var body = Data()
