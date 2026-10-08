@@ -9,3 +9,6 @@ build/
 # Node (server, later)
 node_modules/
 .env
+
+# Swift packages checked out by scripts/release-mac.sh
+.build/

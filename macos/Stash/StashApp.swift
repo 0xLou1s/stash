@@ -4,6 +4,7 @@ import SwiftUI
 struct StashApp: App {
     @State private var store: BookmarkStore
     @State private var bridge: ExtensionBridge
+    @State private var updater = Updater()
     @AppStorage("appearance") private var appearance: Appearance = .system
 
     init() {
@@ -32,6 +33,12 @@ struct StashApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+                .disabled(!updater.canCheckForUpdates)
+            }
             CommandGroup(after: .newItem) {
                 Button("Refresh") {
                     Task { await store.load() }

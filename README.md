@@ -50,6 +50,8 @@ x.com ──save──▶ extension storage ──sync queue──▶ Mac app (1
 stash/
 ├── macos/       SwiftUI app (Xcode project)
 ├── extension/   Chrome extension (WXT, React, Tailwind, shadcn/ui)
+├── scripts/     release-mac.sh
+├── design/      App icon source
 └── docs/        Demo video
 ```
 
@@ -104,6 +106,31 @@ Both sides are set up so a server can slot in without reworking them:
   marker. That's what a sync engine needs to merge changes in both directions. It would run
   next to `LocalBookmarkService`, so the views don't change.
 
+## Releasing the Mac app
+
+Installed copies update themselves with [Sparkle](https://sparkle-project.org): they check
+the feed in the public [stash-releases](https://github.com/0xLou1s/stash-releases) repo once a
+day, and you can check any time from **Stash › Check for Updates…**. That repo holds only builds
+and the feed; the source stays here.
+
+To publish a version:
+
+```sh
+scripts/release-mac.sh 0.2.0 notes.md        # notes.md: what's new, in Markdown (optional)
+DRY_RUN=1 scripts/release-mac.sh 0.2.0       # build and sign only, publish nothing
+```
+
+The script sets the version, builds a Release zip, signs it, uploads it as a release of
+stash-releases, adds it to `appcast.xml` there, then commits and tags `mac-v0.2.0` here.
+
+- **Signing key.** Updates are signed with an EdDSA key kept in your login Keychain
+  (account `stash`); the app has the matching public key in `macos/Stash-Info.plist` and
+  refuses anything else. Back it up with Sparkle's `generate_keys --account stash -x key.txt`
+  and keep that file somewhere safe: without the key, installed copies can't be updated.
+- **First install.** The app isn't signed with an Apple Developer ID yet, so the first time
+  someone opens a downloaded copy macOS blocks it; they allow it in System Settings ›
+  Privacy & Security › Open Anyway. Updates after that install without the warning.
+
 ## Bookmark format
 
 Both sides use the same JSON, so a server only has to store and return it:
@@ -136,5 +163,4 @@ Both sides use the same JSON, so a server only has to store and return it:
 ## Not yet
 
 - Cloud sync, and sync from the Mac app back to the extension
-- An extension icon (Chrome shows a letter for now)
-- A signed, notarized build of the Mac app
+- Developer ID signing and notarization for the Mac app

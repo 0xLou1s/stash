@@ -1,6 +1,7 @@
 import SwiftUI
 
-private struct AspectRatioKey: LayoutValueKey {
+// nonisolated: layouts read it off the main actor.
+nonisolated private struct AspectRatioKey: LayoutValueKey {
     static let defaultValue: CGFloat = 1
 }
 

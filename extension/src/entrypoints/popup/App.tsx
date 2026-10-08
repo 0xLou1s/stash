@@ -36,9 +36,7 @@ export default function App() {
     <TooltipProvider delayDuration={400}>
       <div className="flex h-135 w-95 flex-col">
         <header className="flex items-center gap-3 px-4 pt-4 pb-3">
-          <div className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Archive className="size-4" aria-hidden />
-          </div>
+          <img src="/icon/128.png" alt="" className="-m-1 size-10" />
           <div className="min-w-0 flex-1">
             <h1 className="text-sm leading-5 font-semibold">Stash</h1>
             <p className="text-xs text-muted-foreground">

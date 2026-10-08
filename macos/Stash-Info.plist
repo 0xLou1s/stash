@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sparkle updates. Merged with the Info.plist Xcode generates from build settings. -->
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/0xLou1s/stash-releases/main/appcast.xml</string>
+	<!-- Updates must be signed with the matching private key (login Keychain, account "stash"). -->
+	<key>SUPublicEDKey</key>
+	<string>YUBcvQWHBpstIdaIsY8dP4babFVWP/VFYYBJtQeQySs=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+</dict>
+</plist>
