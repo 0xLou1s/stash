@@ -20,7 +20,11 @@ everything you saved in a native macOS gallery.
 
 ## Getting started
 
-You need macOS 15 or later, Xcode 26, Node 22 and pnpm.
+**Just want the app?** Download `Stash-<version>.zip` from the
+[latest Mac release](https://github.com/0xLou1s/stash/releases), unzip it and move Stash to
+Applications. It updates itself from then on.
+
+To build from source you need macOS 15 or later, Xcode 26, Node 22 and pnpm.
 
 **1. Run the Mac app.** Open `macos/Stash.xcodeproj` and press Run (⌘R).
 
@@ -52,7 +56,8 @@ stash/
 ├── extension/   Chrome extension (WXT, React, Tailwind, shadcn/ui)
 ├── scripts/     release-mac.sh
 ├── design/      App icon source
-└── docs/        Demo video
+├── docs/        Demo video
+└── appcast.xml  Update feed the Mac app checks
 ```
 
 ### Mac app
@@ -108,10 +113,9 @@ Both sides are set up so a server can slot in without reworking them:
 
 ## Releasing the Mac app
 
-Installed copies update themselves with [Sparkle](https://sparkle-project.org): they check
-the feed in the public [stash-releases](https://github.com/0xLou1s/stash-releases) repo once a
-day, and you can check any time from **Stash › Check for Updates…**. That repo holds only builds
-and the feed; the source stays here.
+Installed copies update themselves with [Sparkle](https://sparkle-project.org): once a day
+they read `appcast.xml` at the root of this repo, and you can check any time from
+**Stash › Check for Updates…**. The builds are this repo's GitHub releases, tagged `mac-v<version>`.
 
 To publish a version:
 
@@ -120,8 +124,8 @@ scripts/release-mac.sh 0.2.0 notes.md        # notes.md: what's new, in Markdown
 DRY_RUN=1 scripts/release-mac.sh 0.2.0       # build and sign only, publish nothing
 ```
 
-The script sets the version, builds a Release zip, signs it, uploads it as a release of
-stash-releases, adds it to `appcast.xml` there, then commits and tags `mac-v0.2.0` here.
+The script sets the version, builds a Release zip and signs it, commits and tags `mac-v0.2.0`,
+uploads the zip as that tag's GitHub release, and only then adds it to `appcast.xml`.
 
 - **Signing key.** Updates are signed with an EdDSA key kept in your login Keychain
   (account `stash`); the app has the matching public key in `macos/Stash-Info.plist` and

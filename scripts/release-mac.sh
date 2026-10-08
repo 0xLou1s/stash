@@ -9,9 +9,9 @@
 #   1. Sets the version and build number in the Xcode project.
 #   2. Builds the app in Release and zips it.
 #   3. Signs the zip with the Sparkle key in your login Keychain (account "stash").
-#   4. Uploads the zip as release v<version> of 0xLou1s/stash-releases (public).
-#   5. Adds the release to appcast.xml in that repo: the feed installed apps check.
-#   6. Commits the version bump here, tags it mac-v<version>, and pushes.
+#   4. Commits the version bump, tags it mac-v<version> and pushes.
+#   5. Uploads the zip as the GitHub release for that tag.
+#   6. Adds the release to appcast.xml (the feed installed apps check) and pushes.
 #
 # Needs Xcode, gh (logged in) and a clean working tree.
 set -euo pipefail
@@ -20,12 +20,14 @@ VERSION="${1:?usage: scripts/release-mac.sh <version> [release-notes.md]}"
 NOTES_FILE="${2:-}"
 DRY_RUN="${DRY_RUN:-}"
 
-RELEASES_REPO="0xLou1s/stash-releases"
+REPO="0xLou1s/stash"
+TAG="mac-v$VERSION"
 KEY_ACCOUNT="stash"
 MINIMUM_MACOS="15.0" # Keep in sync with MACOSX_DEPLOYMENT_TARGET.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$ROOT/macos/Stash.xcodeproj"
+FEED="$ROOT/appcast.xml"
 PACKAGES="$ROOT/macos/.build/SourcePackages"
 WORK="$(mktemp -d)"
 
@@ -39,8 +41,8 @@ else
     echo "Commit or stash your changes first; the release commit should only bump the version." >&2
     exit 1
   fi
-  if gh release view "v$VERSION" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
-    echo "v$VERSION is already released." >&2
+  if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    echo "$TAG already exists." >&2
     exit 1
   fi
 fi
@@ -72,10 +74,10 @@ echo "→ Signing"
 # Prints: sparkle:edSignature="…" length="…"
 SIGNATURE="$("$PACKAGES/artifacts/sparkle/Sparkle/bin/sign_update" --account "$KEY_ACCOUNT" "$ZIP")"
 
-FEED_ITEM="$(python3 - "$VERSION" "$BUILD" "$SIGNATURE" "$NOTES" "$RELEASES_REPO" "$MINIMUM_MACOS" <<'PY'
+FEED_ITEM="$(python3 - "$VERSION" "$BUILD" "$SIGNATURE" "$NOTES" "$REPO" "$TAG" "$MINIMUM_MACOS" <<'PY'
 import email.utils, sys
-version, build, signature, notes, repo, minimum = sys.argv[1:]
-url = f"https://github.com/{repo}/releases/download/v{version}/Stash-{version}.zip"
+version, build, signature, notes, repo, tag, minimum = sys.argv[1:]
+url = f"https://github.com/{repo}/releases/download/{tag}/Stash-{version}.zip"
 print(f"""    <item>
       <title>Version {version}</title>
       <pubDate>{email.utils.formatdate(usegmt=True)}</pubDate>
@@ -94,12 +96,17 @@ if [[ -n "$DRY_RUN" ]]; then
   exit 0
 fi
 
-echo "→ Uploading to $RELEASES_REPO"
-gh release create "v$VERSION" "$ZIP" --repo "$RELEASES_REPO" --title "Stash $VERSION" --notes "$NOTES"
+echo "→ Tagging $TAG"
+git -C "$ROOT" commit -q -m "Release Stash for Mac $VERSION" -- "$PROJECT/project.pbxproj"
+git -C "$ROOT" tag "$TAG"
+git -C "$ROOT" push -q --follow-tags
 
+echo "→ Uploading"
+gh release create "$TAG" "$ZIP" --repo "$REPO" --verify-tag --title "Stash for Mac $VERSION" --notes "$NOTES"
+
+# Only now, with the zip online, does the feed point at it.
 echo "→ Updating the feed"
-gh repo clone "$RELEASES_REPO" "$WORK/releases" -- --quiet --depth 1
-python3 - "$WORK/releases/appcast.xml" "$FEED_ITEM" <<'PY'
+python3 - "$FEED" "$FEED_ITEM" <<'PY'
 import sys
 path, item = sys.argv[1:]
 xml = open(path).read()
@@ -107,12 +114,7 @@ xml = open(path).read()
 anchor = "    <item>" if "    <item>" in xml else "  </channel>"
 open(path, "w").write(xml.replace(anchor, item + "\n" + anchor, 1))
 PY
-git -C "$WORK/releases" commit -q -am "Stash $VERSION"
-git -C "$WORK/releases" push -q
+git -C "$ROOT" commit -q -m "Add Stash for Mac $VERSION to the update feed" -- "$FEED"
+git -C "$ROOT" push -q
 
-echo "→ Tagging mac-v$VERSION"
-git -C "$ROOT" commit -q -m "Release Stash for Mac $VERSION" -- "$PROJECT/project.pbxproj"
-git -C "$ROOT" tag "mac-v$VERSION"
-git -C "$ROOT" push -q --follow-tags
-
-echo "✓ Stash $VERSION is out: https://github.com/$RELEASES_REPO/releases/tag/v$VERSION"
+echo "✓ Stash $VERSION is out: https://github.com/$REPO/releases/tag/$TAG"

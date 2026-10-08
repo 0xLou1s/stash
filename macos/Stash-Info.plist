@@ -4,7 +4,7 @@
 <dict>
 	<!-- Sparkle updates. Merged with the Info.plist Xcode generates from build settings. -->
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/0xLou1s/stash-releases/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/0xLou1s/stash/main/appcast.xml</string>
 	<!-- Updates must be signed with the matching private key (login Keychain, account "stash"). -->
 	<key>SUPublicEDKey</key>
 	<string>YUBcvQWHBpstIdaIsY8dP4babFVWP/VFYYBJtQeQySs=</string>
