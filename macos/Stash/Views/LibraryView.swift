@@ -1,116 +1,90 @@
 import SwiftUI
 
 struct LibraryView: View {
-    @Environment(BookmarkStore.self) private var store
+    @SceneStorage("libraryMode") private var mode: LibraryMode = .inspire
     @State private var sidebarSelection: SidebarItem? = .all
-    @State private var selection: Bookmark.ID?
+    @State private var linkSidebarSelection: LinkSidebarItem? = .all
     @State private var searchText = ""
-    @State private var showsInspector = false
-    @AppStorage("appearance") private var appearance: Appearance = .system
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $sidebarSelection)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-        } detail: {
-            GalleryView(
-                bookmarks: store.bookmarks(in: sidebarSelection ?? .all, matching: searchText),
-                scope: sidebarSelection ?? .all,
-                isSearching: !searchText.isEmpty,
-                selection: $selection
-            )
-            .navigationTitle(title)
-            .toolbar(removing: .title)
-            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-            .inspector(isPresented: $showsInspector) {
-                inspector
-                    .inspectorColumnWidth(min: 280, ideal: 320, max: 440)
-            }
-            .toolbar {
-                ToolbarItemGroup {
-                    Button(sidebarSelection == .trash ? "Delete Immediately" : "Move to Trash", systemImage: "trash") {
-                        guard let selection else { return }
-                        Task {
-                            if sidebarSelection == .trash {
-                                await store.deletePermanently([selection])
-                            } else {
-                                await store.moveToTrash([selection])
-                            }
-                        }
-                    }
-                    .keyboardShortcut(.delete, modifiers: .command)
-                    .disabled(selection == nil)
-
-                    Menu("Appearance", systemImage: "circle.lefthalf.filled") {
-                        Picker("Appearance", selection: $appearance) {
-                            ForEach(Appearance.allCases) { option in
-                                Text(option.title).tag(option)
-                            }
-                        }
-                        .pickerStyle(.inline)
-                        .labelsHidden()
-                    }
-                    .help("Appearance")
-
-                    Button("Inspector", systemImage: "sidebar.right") {
-                        showsInspector.toggle()
-                    }
+            Group {
+                switch mode {
+                case .inspire:
+                    SidebarView(selection: $sidebarSelection)
+                case .bookmarks:
+                    LinkSidebarView(selection: $linkSidebarSelection)
                 }
             }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+        } detail: {
+            switch mode {
+            case .inspire:
+                InspireView(mode: $mode, scope: sidebarSelection ?? .all, searchText: searchText)
+            case .bookmarks:
+                LinksView(mode: $mode, scope: $linkSidebarSelection, searchText: searchText)
+            }
         }
-        .searchable(text: $searchText, prompt: "Search posts")
-        .onChange(of: sidebarSelection) {
-            selection = nil
-        }
-        .onChange(of: selection) {
-            // Selecting a post opens the panel; deselecting (clicking it again) closes it.
-            showsInspector = selection != nil
-        }
-        .alert(
-            "Something went wrong",
-            isPresented: Binding(
-                get: { store.errorMessage != nil },
-                set: { if !$0 { store.errorMessage = nil } }
-            )
-        ) {
-            Button("OK") {}
-        } message: {
-            Text(store.errorMessage ?? "")
+        .searchable(text: $searchText, prompt: mode == .inspire ? "Search posts" : "Search bookmarks")
+        .focusedSceneValue(\.libraryMode, $mode)
+        .onChange(of: mode) {
+            searchText = ""
         }
     }
+}
 
-    @ViewBuilder
-    private var inspector: some View {
-        if let selection, let bookmark = store.bookmark(id: selection) {
-            BookmarkInspector(bookmark: bookmark)
-        } else {
-            ContentUnavailableView(
-                "No Post Selected",
-                systemImage: "sidebar.right",
-                description: Text("Select a post to see its details.")
-            )
+/// Switches between Inspire and Bookmarks; in both modes' toolbars, beside
+/// `AppearanceMenu`. The icon shows the current mode.
+struct LibraryModeMenu: View {
+    @Binding var mode: LibraryMode
+
+    var body: some View {
+        Menu(mode.title, systemImage: mode.systemImage) {
+            Picker("Library", selection: $mode) {
+                ForEach(LibraryMode.allCases) { option in
+                    Label(option.title, systemImage: option.systemImage).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
+        .help("\(mode.title) — switch with ⌘1 and ⌘2")
     }
+}
 
-    /// Used for the window name in the Window menu; the toolbar hides it.
-    private var title: String {
-        switch sidebarSelection ?? .all {
-        case .all: "All"
-        case .inbox: "Inbox"
-        case .trash: "Trash"
-        case .collection(let id):
-            store.collections.first { $0.id == id }?.name ?? "Collection"
-        case .author(let handle):
-            store.library.first { $0.author.handle == handle }?.author.name ?? "@\(handle)"
+/// Light, dark, or follow the system; in both modes' toolbars.
+struct AppearanceMenu: View {
+    @AppStorage("appearance") private var appearance: Appearance = .system
+
+    var body: some View {
+        Menu("Appearance", systemImage: "circle.lefthalf.filled") {
+            Picker("Appearance", selection: $appearance) {
+                ForEach(Appearance.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
+        .help("Appearance")
     }
 }
 
 #Preview {
-    @Previewable @State var store = BookmarkStore(
-        service: LocalBookmarkService(fileURL: .temporaryDirectory.appending(path: "stash-preview.json"))
-    )
+    @Previewable @State var store = BookmarkStore(service: LocalBookmarkService.preview)
+    @Previewable @State var linkStore = LinkStore(service: LocalBookmarkService.preview)
     LibraryView()
         .environment(store)
-        .task { await store.load() }
+        .environment(linkStore)
+        .task {
+            await store.load()
+            await linkStore.load()
+        }
 }
+
+#if DEBUG
+extension LocalBookmarkService {
+    /// One file for both previewed stores, so neither overwrites the other's changes.
+    static let preview = LocalBookmarkService(fileURL: .temporaryDirectory.appending(path: "stash-preview.json"))
+}
+#endif

@@ -28,23 +28,26 @@ struct SidebarView: View {
 
             Section("Collections", isExpanded: $showsCollections) {
                 ForEach(store.collections) { collection in
-                    CollectionRow(
-                        collection: collection,
+                    RenamableRow(
+                        name: collection.name,
+                        systemImage: "rectangle.stack",
                         count: counts[.collection(id: collection.id), default: 0],
-                        renamingID: $renamingCollectionID
-                    )
-                        .tag(SidebarItem.collection(id: collection.id))
-                        .contextMenu {
-                            Button("Rename") {
-                                renamingCollectionID = collection.id
-                            }
-                            Button("Delete Collection…", role: .destructive) {
-                                collectionPendingDeletion = collection
-                            }
+                        isRenaming: isRenaming(collection.id)
+                    ) { name in
+                        Task { await store.renameCollection(collection.id, to: name) }
+                    }
+                    .tag(SidebarItem.collection(id: collection.id))
+                    .contextMenu {
+                        Button("Rename") {
+                            renamingCollectionID = collection.id
                         }
-                        .dropDestination(for: String.self) { bookmarkIDs, _ in
-                            add(bookmarkIDs, to: collection)
+                        Button("Delete Collection…", role: .destructive) {
+                            collectionPendingDeletion = collection
                         }
+                    }
+                    .dropDestination(for: String.self) { bookmarkIDs, _ in
+                        add(bookmarkIDs, to: collection)
+                    }
                 }
 
                 Button(action: createCollection) {
@@ -92,6 +95,13 @@ struct SidebarView: View {
             .tag(item)
     }
 
+    private func isRenaming(_ id: BookmarkCollection.ID) -> Binding<Bool> {
+        Binding(
+            get: { renamingCollectionID == id },
+            set: { if !$0, renamingCollectionID == id { renamingCollectionID = nil } }
+        )
+    }
+
     private func createCollection() {
         showsCollections = true
         Task {
@@ -117,48 +127,5 @@ struct SidebarView: View {
             }
         }
         return true
-    }
-}
-
-/// A collection in the sidebar; turns into a text field while being renamed.
-private struct CollectionRow: View {
-    @Environment(BookmarkStore.self) private var store
-    let collection: BookmarkCollection
-    let count: Int
-    @Binding var renamingID: BookmarkCollection.ID?
-
-    @State private var draft = ""
-    @FocusState private var isEditing: Bool
-
-    var body: some View {
-        if renamingID == collection.id {
-            Label {
-                TextField("Collection Name", text: $draft)
-                    .focused($isEditing)
-                    .onSubmit(commit)
-                    .onExitCommand { renamingID = nil }
-            } icon: {
-                Image(systemName: "rectangle.stack")
-            }
-            .task {
-                draft = collection.name
-                isEditing = true
-            }
-            .onChange(of: isEditing) {
-                if !isEditing { commit() }
-            }
-        } else {
-            Label(collection.name, systemImage: "rectangle.stack")
-                .badge(count)
-        }
-    }
-
-    private func commit() {
-        guard renamingID == collection.id else { return }
-        renamingID = nil
-
-        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name != collection.name else { return }
-        Task { await store.renameCollection(collection.id, to: name) }
     }
 }

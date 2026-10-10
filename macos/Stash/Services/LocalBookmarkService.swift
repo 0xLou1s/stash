@@ -4,12 +4,17 @@ import Foundation
 struct LibrarySnapshot: Codable {
     /// Bump when the file format changes in a way older versions can't read,
     /// and migrate in `LocalBookmarkService.load`.
-    static let currentSchemaVersion = 1
+    ///
+    /// 2 added `links` and `linkFolders`. Version 1 apps could read the file
+    /// but would drop both on their next write, so they must open it read-only.
+    static let currentSchemaVersion = 2
 
     var schemaVersion = currentSchemaVersion
     /// Includes deleted records (`deletedAt` set) so deletions can sync later.
     var bookmarks: [Bookmark] = []
     var collections: [BookmarkCollection] = []
+    var links: [SavedLink] = []
+    var linkFolders: [LinkFolder] = []
 }
 
 extension LibrarySnapshot {
@@ -18,6 +23,8 @@ extension LibrarySnapshot {
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         bookmarks = try container.decodeIfPresent([Bookmark].self, forKey: .bookmarks) ?? []
         collections = try container.decodeIfPresent([BookmarkCollection].self, forKey: .collections) ?? []
+        links = try container.decodeIfPresent([SavedLink].self, forKey: .links) ?? []
+        linkFolders = try container.decodeIfPresent([LinkFolder].self, forKey: .linkFolders) ?? []
     }
 }
 
@@ -120,6 +127,50 @@ final class LocalBookmarkService: BookmarkService {
         }
     }
 
+    func fetchLinks() async throws -> [SavedLink] {
+        snapshot.links.filter { $0.deletedAt == nil }
+    }
+
+    func saveLink(_ link: SavedLink) async throws {
+        try write { $0.links.upsert(link) }
+    }
+
+    func saveLinks(_ links: [SavedLink]) async throws {
+        try write { snapshot in
+            for link in links {
+                snapshot.links.upsert(link)
+            }
+        }
+    }
+
+    func deleteLink(id: SavedLink.ID) async throws {
+        try write { snapshot in
+            guard let index = snapshot.links.firstIndex(where: { $0.id == id }) else { return }
+            snapshot.links[index].deletedAt = .now
+            snapshot.links[index].updatedAt = .now
+        }
+    }
+
+    func fetchLinkFolders() async throws -> [LinkFolder] {
+        snapshot.linkFolders.filter { $0.deletedAt == nil }
+    }
+
+    func saveLinkFolder(_ folder: LinkFolder) async throws {
+        try write { $0.linkFolders.upsert(folder) }
+    }
+
+    func deleteLinkFolder(id: LinkFolder.ID) async throws {
+        try write { snapshot in
+            guard let index = snapshot.linkFolders.firstIndex(where: { $0.id == id }) else { return }
+            snapshot.linkFolders[index].deletedAt = .now
+            snapshot.linkFolders[index].updatedAt = .now
+            for linkIndex in snapshot.links.indices where snapshot.links[linkIndex].folderID == id {
+                snapshot.links[linkIndex].folderID = nil
+                snapshot.links[linkIndex].updatedAt = .now
+            }
+        }
+    }
+
     // MARK: - File
 
     private func load() {
@@ -164,6 +215,9 @@ final class LocalBookmarkService: BookmarkService {
 
         var updated = snapshot
         change(&updated)
+        // A file from an older version is now in this version's format; say so,
+        // or that version would open it and drop what it doesn't know about.
+        updated.schemaVersion = LibrarySnapshot.currentSchemaVersion
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
@@ -176,5 +230,16 @@ final class LocalBookmarkService: BookmarkService {
     func takeLaunchWarning() -> String? {
         defer { pendingWarning = nil }
         return pendingWarning?.localizedDescription
+    }
+}
+
+private extension Array where Element: Identifiable {
+    /// Replaces the element with the same id, or appends.
+    mutating func upsert(_ element: Element) {
+        if let index = firstIndex(where: { $0.id == element.id }) {
+            self[index] = element
+        } else {
+            append(element)
+        }
     }
 }

@@ -17,6 +17,21 @@ protocol BookmarkService {
     /// Deletes the collection and removes it from every post; the posts themselves stay.
     func deleteCollection(id: BookmarkCollection.ID) async throws
 
+    /// Every saved web page that isn't deleted, including ones in Trash.
+    func fetchLinks() async throws -> [SavedLink]
+    /// Inserts or replaces by id.
+    func saveLink(_ link: SavedLink) async throws
+    /// Inserts or replaces each by id, all at once.
+    func saveLinks(_ links: [SavedLink]) async throws
+    /// Deletes for good (leaves a hidden `deletedAt` marker for sync).
+    func deleteLink(id: SavedLink.ID) async throws
+
+    func fetchLinkFolders() async throws -> [LinkFolder]
+    /// Inserts or replaces by id.
+    func saveLinkFolder(_ folder: LinkFolder) async throws
+    /// Deletes the folder; its links stay, outside any folder.
+    func deleteLinkFolder(id: LinkFolder.ID) async throws
+
     /// A problem found while opening the library that the user should hear about once.
     func takeLaunchWarning() -> String?
 }
