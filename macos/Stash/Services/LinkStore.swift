@@ -41,52 +41,113 @@ final class LinkStore {
     /// back from Trash, gaining `tags`. Without a `title`, the page's own is used.
     @discardableResult
     func add(_ url: URL, title: String? = nil, to folderID: LinkFolder.ID? = nil, tags: [String] = []) async -> SavedLink? {
+        let (link, isNew) = prepare(url, title: title, folderID: folderID, tags: tags)
+        guard await save([link]) else { return nil }
+        if isNew {
+            await refreshMetadata(of: [link.id], keepingTitles: title != nil)
+        }
+        return self.link(id: link.id)
+    }
+
+    /// Adds every page to the folder; ones already saved move there. All are
+    /// saved at once, then their titles and icons load together.
+    func add(_ urls: [URL], to folderID: LinkFolder.ID?) async {
+        var seen = Set<URL>()
+        let prepared = urls
+            .filter { seen.insert($0).inserted }
+            .map { prepare($0, title: nil, folderID: folderID, tags: []) }
+        guard await save(prepared.map(\.link)) else { return }
+        await refreshMetadata(of: prepared.filter(\.isNew).map(\.link.id), keepingTitles: false)
+    }
+
+    /// The saved link for `url` with the changes applied, or a new one.
+    private func prepare(_ url: URL, title: String?, folderID: LinkFolder.ID?, tags: [String]) -> (link: SavedLink, isNew: Bool) {
         if var existing = links.first(where: { $0.url == url }) {
             existing.folderID = folderID
             existing.trashedAt = nil
             existing.tags = SavedLink.normalizedTags(existing.tags + tags)
             if let title { existing.title = title }
-            return await save(existing) ? existing : nil
+            return (existing, false)
         }
-
         var link = SavedLink(url: url, title: title, folderID: folderID)
         link.tags = SavedLink.normalizedTags(tags)
-        guard await save(link) else { return nil }
-        await refreshMetadata(of: link.id, keepingTitle: title != nil)
-        return link
+        return (link, true)
     }
 
-    /// Adds every page to the folder; ones already saved move there.
-    func add(_ urls: [URL], to folderID: LinkFolder.ID?) async {
-        for url in urls {
-            await add(url, to: folderID)
+    // MARK: - Page details
+
+    /// Fills in titles (unless `keepingTitles`, or the link was renamed) and
+    /// icons from the web, a few pages at a time. Each shows as it arrives;
+    /// they're saved in batches, as they are at that moment, so a rename,
+    /// move, or delete made while loading is never undone.
+    func refreshMetadata(of ids: [SavedLink.ID], keepingTitles: Bool) async {
+        var pending = ids
+            .compactMap { link(id: $0) }
+            .map { ($0.id, $0.url) }
+            .makeIterator()
+        let loadMetadata = self.loadMetadata
+        var unsaved: Set<SavedLink.ID> = []
+
+        await withTaskGroup(of: (SavedLink.ID, URL, LinkMetadata?).self) { group in
+            for _ in 0..<6 {
+                guard let (id, url) = pending.next() else { break }
+                group.addTask { (id, url, await loadMetadata(url)) }
+            }
+            for await (id, url, metadata) in group {
+                if let (id, url) = pending.next() {
+                    group.addTask { (id, url, await loadMetadata(url)) }
+                }
+                // Re-check: the link may have been edited or deleted while loading.
+                guard let metadata, let index = links.firstIndex(where: { $0.id == id }), links[index].url == url else { continue }
+                var link = links[index]
+                if !keepingTitles, link.title == url.displayHost, let title = metadata.title {
+                    link.title = title
+                }
+                link.iconURL = metadata.iconURL ?? link.iconURL
+                guard link != links[index] else { continue }
+                link.updatedAt = .now
+                links[index] = link
+                unsaved.insert(id)
+                if unsaved.count >= 25 {
+                    await saveCurrentState(of: unsaved)
+                    unsaved.removeAll()
+                }
+            }
         }
+        await saveCurrentState(of: unsaved)
     }
 
-    private func refreshMetadata(of id: SavedLink.ID, keepingTitle: Bool) async {
-        guard let url = link(id: id)?.url, let metadata = await loadMetadata(url) else { return }
-
-        // The link may have been renamed, edited, or deleted while loading.
-        guard var current = link(id: id), current.url == url else { return }
-        if !keepingTitle, current.title == url.displayHost, let title = metadata.title {
-            current.title = title
+    /// Writes links as they are now, skipping any deleted since.
+    private func saveCurrentState(of ids: Set<SavedLink.ID>) async {
+        let current = links.filter { ids.contains($0.id) }
+        guard !current.isEmpty else { return }
+        do {
+            try await service.saveLinks(current)
+        } catch {
+            errorMessage = error.localizedDescription
         }
-        current.iconURL = metadata.iconURL ?? current.iconURL
-        await save(current)
     }
 
     // MARK: - Importing
 
     /// Adds pages from another browser to the folder named `folderName`, made
-    /// if there isn't one. Pages already saved stay where they are. Returns the
-    /// links added, which have no icons yet; see `loadIcons(for:)`.
+    /// if there isn't one and something is added. Pages already saved stay
+    /// where they are. Returns the links added, which have no icons yet; see
+    /// `refreshMetadata(of:keepingTitles:)`.
     @discardableResult
     func importPages(_ pages: [ImportedPage], intoFolderNamed folderName: String) async -> [SavedLink] {
-        let folder: LinkFolder
-        if let existing = folders.first(where: { $0.name == folderName }) {
-            folder = existing
-        } else {
-            folder = LinkFolder(name: folderName)
+        let existingFolder = folders.first { $0.name == folderName }
+        let folder = existingFolder ?? LinkFolder(name: folderName)
+
+        var known = Set(links.map(\.url))
+        let added: [SavedLink] = pages.compactMap { page in
+            guard page.url.isWebPage, known.insert(page.url).inserted else { return nil }
+            let title = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return SavedLink(url: page.url, title: title.isEmpty ? nil : title, folderID: folder.id, savedAt: page.addedAt ?? .now)
+        }
+        guard !added.isEmpty else { return [] }
+
+        if existingFolder == nil {
             do {
                 try await service.saveLinkFolder(folder)
                 folders.append(folder)
@@ -95,70 +156,7 @@ final class LinkStore {
                 return []
             }
         }
-
-        var known = Set(links.map(\.url))
-        let now = Date.now
-        let added: [SavedLink] = pages.compactMap { page in
-            guard page.url.isWebPage, known.insert(page.url).inserted else { return nil }
-            let title = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            var link = SavedLink(url: page.url, title: title.isEmpty ? nil : title, folderID: folder.id, savedAt: page.addedAt ?? now)
-            link.updatedAt = now
-            return link
-        }
-        guard !added.isEmpty else { return [] }
-
-        do {
-            try await service.saveLinks(added)
-        } catch {
-            errorMessage = error.localizedDescription
-            return []
-        }
-        links.append(contentsOf: added)
-        links.sort { $0.savedAt > $1.savedAt }
-        return added
-    }
-
-    /// Finds icons for links that have none, a few pages at a time, keeping
-    /// their titles. Shows each as it arrives and saves them in batches.
-    func loadIcons(for ids: [SavedLink.ID]) async {
-        var pending = ids
-            .compactMap { link(id: $0) }
-            .filter { $0.iconURL == nil }
-            .map { ($0.id, $0.url) }
-            .makeIterator()
-        let loadMetadata = self.loadMetadata
-        var unsaved: [SavedLink] = []
-
-        await withTaskGroup(of: (SavedLink.ID, URL?).self) { group in
-            for _ in 0..<6 {
-                guard let (id, url) = pending.next() else { break }
-                group.addTask { (id, await loadMetadata(url)?.iconURL) }
-            }
-            for await (id, iconURL) in group {
-                if let (id, url) = pending.next() {
-                    group.addTask { (id, await loadMetadata(url)?.iconURL) }
-                }
-                // Re-check: the link may have changed or gone while loading.
-                guard let iconURL, var link = link(id: id), link.iconURL == nil,
-                      let index = links.firstIndex(where: { $0.id == id })
-                else { continue }
-                link.iconURL = iconURL
-                link.updatedAt = .now
-                links[index] = link
-                unsaved.append(link)
-                if unsaved.count >= 25 {
-                    await saveIcons(unsaved)
-                    unsaved.removeAll()
-                }
-            }
-        }
-        await saveIcons(unsaved)
-    }
-
-    /// Icons are found again next time if saving fails, so a failure isn't worth an alert.
-    private func saveIcons(_ links: [SavedLink]) async {
-        guard !links.isEmpty else { return }
-        try? await service.saveLinks(links)
+        return await save(added) ? added : []
     }
 
     // MARK: - Changes
@@ -172,22 +170,18 @@ final class LinkStore {
         link.folderID = folderID
         if let tags { link.tags = SavedLink.normalizedTags(tags) }
         if addressChanged { link.iconURL = nil }
-        guard await save(link), addressChanged else { return }
-        await refreshMetadata(of: id, keepingTitle: !title.isEmpty)
+        guard await save([link]), addressChanged else { return }
+        await refreshMetadata(of: [id], keepingTitles: !title.isEmpty)
     }
 
     func move(_ ids: Set<SavedLink.ID>, to folderID: LinkFolder.ID?) async {
-        for id in ids {
-            await update(id) { $0.folderID = folderID }
-        }
+        await update(ids) { $0.folderID = folderID }
     }
 
     /// Adds or removes a tag on each link.
     func setTag(_ tag: String, included: Bool, for ids: Set<SavedLink.ID>) async {
-        for id in ids {
-            await update(id) { link in
-                link.tags = SavedLink.normalizedTags(included ? link.tags + [tag] : link.tags.filter { $0 != tag })
-            }
+        await update(ids) { link in
+            link.tags = SavedLink.normalizedTags(included ? link.tags + [tag] : link.tags.filter { $0 != tag })
         }
     }
 
@@ -197,22 +191,16 @@ final class LinkStore {
     }
 
     func moveToTrash(_ ids: Set<SavedLink.ID>) async {
-        for id in ids {
-            await update(id) { $0.trashedAt = .now }
-        }
+        await update(ids) { $0.trashedAt = .now }
     }
 
     func putBack(_ ids: Set<SavedLink.ID>) async {
-        for id in ids {
-            await update(id) { $0.trashedAt = nil }
-        }
+        await update(ids) { $0.trashedAt = nil }
     }
 
     func deletePermanently(_ ids: Set<SavedLink.ID>) async {
         do {
-            for id in ids {
-                try await service.deleteLink(id: id)
-            }
+            try await service.deleteLinks(ids: ids)
             links.removeAll { ids.contains($0.id) }
         } catch {
             errorMessage = error.localizedDescription
@@ -223,29 +211,45 @@ final class LinkStore {
         await deletePermanently(Set(links.filter(\.isTrashed).map(\.id)))
     }
 
-    private func update(_ id: SavedLink.ID, _ change: (inout SavedLink) -> Void) async {
-        guard var updated = link(id: id) else { return }
-        change(&updated)
-        await save(updated)
+    /// Applies `change` to each link, saving them all in one write.
+    private func update(_ ids: Set<SavedLink.ID>, _ change: (inout SavedLink) -> Void) async {
+        let changed = links
+            .filter { ids.contains($0.id) }
+            .map { link in
+                var link = link
+                change(&link)
+                return link
+            }
+        await save(changed)
     }
 
-    /// Saves to disk, then mirrors the change in memory (newest saved first).
+    /// Saves to disk in one write, then mirrors the changes in memory (newest saved first).
     @discardableResult
-    private func save(_ link: SavedLink) async -> Bool {
-        var link = link
-        link.updatedAt = .now
+    private func save(_ changed: [SavedLink]) async -> Bool {
+        guard !changed.isEmpty else { return true }
+        let now = Date.now
+        let stamped = changed.map { link in
+            var link = link
+            link.updatedAt = now
+            return link
+        }
         do {
-            try await service.saveLink(link)
+            try await service.saveLinks(stamped)
         } catch {
             errorMessage = error.localizedDescription
             return false
         }
-        if let index = links.firstIndex(where: { $0.id == link.id }) {
-            links[index] = link
-        } else {
-            links.append(link)
-            links.sort { $0.savedAt > $1.savedAt }
+
+        var positions = Dictionary(uniqueKeysWithValues: links.enumerated().map { ($1.id, $0) })
+        for link in stamped {
+            if let index = positions[link.id] {
+                links[index] = link
+            } else {
+                positions[link.id] = links.count
+                links.append(link)
+            }
         }
+        links.sort { $0.savedAt > $1.savedAt }
         return true
     }
 

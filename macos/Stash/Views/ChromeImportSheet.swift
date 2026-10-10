@@ -123,7 +123,7 @@ struct ChromeImportSheet: View {
             if let first = folders.first, let stashFolder = store.folders.first(where: { $0.name == first.name }) {
                 scope = .folder(id: stashFolder.id)
             }
-            await store.loadIcons(for: added.map(\.id))
+            await store.refreshMetadata(of: added.map(\.id), keepingTitles: true)
         }
     }
 }

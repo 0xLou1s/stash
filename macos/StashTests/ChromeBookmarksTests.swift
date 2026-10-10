@@ -86,7 +86,7 @@ struct ChromeBookmarksTests {
         let pages = (0..<30).map { ImportedPage(title: "Page \($0)", url: URL(string: "https://site\($0).dev")!) }
         let added = await store.importPages(pages, intoFolderNamed: "Lots")
 
-        await store.loadIcons(for: added.map(\.id))
+        await store.refreshMetadata(of: added.map(\.id), keepingTitles: true)
 
         #expect(store.links.allSatisfy { $0.iconURL == icon })
         #expect(store.links.allSatisfy { $0.title.hasPrefix("Page ") })

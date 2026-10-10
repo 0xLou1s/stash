@@ -9,20 +9,41 @@ struct LinkMetadata: Equatable, Sendable {
 /// Reads a page's `<head>` for its title and favicon. Plain HTML only; a page
 /// that builds its title with JavaScript keeps the name it was saved with.
 nonisolated enum LinkMetadataFetcher {
+    /// Keeps no cookies or cache between the sites it visits.
+    private static let session = URLSession(configuration: .ephemeral)
+
+    /// The head comes first, so this much is plenty; a link to a large file
+    /// stops downloading here.
+    private static let maxHeadBytes = 512 * 1024
+
     @concurrent
     static func fetch(_ url: URL) async -> LinkMetadata? {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.setValue("text/html,application/xhtml+xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
+        guard let (bytes, response) = try? await session.bytes(for: request) else { return nil }
 
         // Redirects change the base relative icon paths resolve against.
         let pageURL = response.url ?? url
-        guard response.mimeType?.contains("html") ?? true else {
-            return LinkMetadata(title: nil, iconURL: defaultIconURL(for: pageURL))
+        let iconOnly = LinkMetadata(title: nil, iconURL: defaultIconURL(for: pageURL))
+        // An error page or bot check ("Just a moment...") makes a poor title.
+        let succeeded = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? true
+        guard succeeded, response.mimeType?.contains("html") ?? true,
+              let head = try? await readHead(of: bytes)
+        else { return iconOnly }
+        return parse(html: String(decoding: head, as: UTF8.self), pageURL: pageURL)
+    }
+
+    /// Reads up to `</head>` or `maxHeadBytes`, whichever comes first.
+    private static func readHead(of bytes: URLSession.AsyncBytes) async throws -> Data {
+        let headEnd = Array("</head>".utf8)
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count >= maxHeadBytes { break }
+            // `| 0x20` lowercases ASCII letters and leaves `<`, `/`, `>` as they are.
+            if byte == UInt8(ascii: ">"), data.suffix(headEnd.count).map({ $0 | 0x20 }) == headEnd { break }
         }
-        // Everything needed is in the head, which comes first.
-        let html = String(decoding: data.prefix(512 * 1024), as: UTF8.self)
-        return parse(html: html, pageURL: pageURL)
+        return data
     }
 
     static func parse(html: String, pageURL: URL) -> LinkMetadata {

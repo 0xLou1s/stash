@@ -18,6 +18,13 @@ struct LibrarySnapshot: Codable {
 }
 
 extension LibrarySnapshot {
+    /// The oldest format that holds everything here. A library without
+    /// bookmarks stays at 1, so versions from before them can still save to
+    /// it; one with bookmarks must say 2, or those versions would drop them.
+    var requiredSchemaVersion: Int {
+        links.isEmpty && linkFolders.isEmpty ? 1 : 2
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
@@ -131,10 +138,6 @@ final class LocalBookmarkService: BookmarkService {
         snapshot.links.filter { $0.deletedAt == nil }
     }
 
-    func saveLink(_ link: SavedLink) async throws {
-        try write { $0.links.upsert(link) }
-    }
-
     func saveLinks(_ links: [SavedLink]) async throws {
         try write { snapshot in
             for link in links {
@@ -143,11 +146,12 @@ final class LocalBookmarkService: BookmarkService {
         }
     }
 
-    func deleteLink(id: SavedLink.ID) async throws {
+    func deleteLinks(ids: Set<SavedLink.ID>) async throws {
         try write { snapshot in
-            guard let index = snapshot.links.firstIndex(where: { $0.id == id }) else { return }
-            snapshot.links[index].deletedAt = .now
-            snapshot.links[index].updatedAt = .now
+            for index in snapshot.links.indices where ids.contains(snapshot.links[index].id) {
+                snapshot.links[index].deletedAt = .now
+                snapshot.links[index].updatedAt = .now
+            }
         }
     }
 
@@ -215,9 +219,7 @@ final class LocalBookmarkService: BookmarkService {
 
         var updated = snapshot
         change(&updated)
-        // A file from an older version is now in this version's format; say so,
-        // or that version would open it and drop what it doesn't know about.
-        updated.schemaVersion = LibrarySnapshot.currentSchemaVersion
+        updated.schemaVersion = updated.requiredSchemaVersion
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),

@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// The sheet for adding a bookmark or editing one.
@@ -68,10 +67,6 @@ struct LinkEditor: View {
         switch target {
         case .add(let folderID):
             self.folderID = folderID
-            // Likely just copied from the browser.
-            if let copied = NSPasteboard.general.string(forType: .string), URL(webAddress: copied) != nil {
-                address = copied.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
         case .edit(let id):
             guard let link = store.link(id: id) else { return }
             address = link.url.absoluteString

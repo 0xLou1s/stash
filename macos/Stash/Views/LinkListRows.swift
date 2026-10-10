@@ -103,7 +103,6 @@ private struct NameCell: View {
             Text(entry.name)
                 .lineLimit(1)
         }
-        .help(entry.help)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(entry.isFolder ? "\(entry.name), folder" : entry.name)
     }

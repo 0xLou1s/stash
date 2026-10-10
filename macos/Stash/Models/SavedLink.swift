@@ -94,7 +94,7 @@ extension LinkFolder {
 extension URL {
     /// Reads an address as typed or pasted: "ui.aceternity.com" becomes
     /// "https://ui.aceternity.com". Nil unless it's an http(s) page with a host.
-    init?(webAddress text: String) {
+    nonisolated init?(webAddress text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace) else { return nil }
         let withScheme = trimmed.contains("://") ? trimmed : "https://" + trimmed
@@ -103,13 +103,13 @@ extension URL {
     }
 
     /// http or https, with a host that looks like one ("localhost" or containing a dot).
-    var isWebPage: Bool {
+    nonisolated var isWebPage: Bool {
         guard ["http", "https"].contains(scheme?.lowercased()), let host = host(), !host.isEmpty else { return false }
         return host == "localhost" || host.contains(".")
     }
 
     /// "www.example.com" → "example.com"; the whole address if there's no host.
-    var displayHost: String {
+    nonisolated var displayHost: String {
         guard let host = host(), !host.isEmpty else { return absoluteString }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }

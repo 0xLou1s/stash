@@ -67,7 +67,7 @@ struct LinksView: View {
         .pasteDestination(for: String.self) { strings in
             paste(strings)
         } validator: { strings in
-            acceptsDrops ? strings.filter { URL(webAddress: $0) != nil } : []
+            acceptsDrops ? strings.filter { !Self.webAddresses(in: [$0]).isEmpty } : []
         }
         .dropDestination(for: URL.self) { urls, _ in
             acceptsDrops && store.drop(urls, into: currentScope.folderID)
@@ -177,11 +177,14 @@ struct LinksView: View {
     }
 
     private func paste(_ strings: [String]) {
-        // One copied address, or several on separate lines.
-        let urls = strings
+        _ = store.drop(Self.webAddresses(in: strings), into: currentScope.folderID)
+    }
+
+    /// One copied address, or several on separate lines.
+    private static func webAddresses(in strings: [String]) -> [URL] {
+        strings
             .flatMap { $0.split(whereSeparator: \.isNewline) }
             .compactMap { URL(webAddress: String($0)) }
-        _ = store.drop(urls, into: currentScope.folderID)
     }
 
     private static func linkIDs(in items: Set<LinkListItem>) -> Set<SavedLink.ID> {

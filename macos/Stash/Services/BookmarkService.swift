@@ -19,12 +19,10 @@ protocol BookmarkService {
 
     /// Every saved web page that isn't deleted, including ones in Trash.
     func fetchLinks() async throws -> [SavedLink]
-    /// Inserts or replaces by id.
-    func saveLink(_ link: SavedLink) async throws
     /// Inserts or replaces each by id, all at once.
     func saveLinks(_ links: [SavedLink]) async throws
-    /// Deletes for good (leaves a hidden `deletedAt` marker for sync).
-    func deleteLink(id: SavedLink.ID) async throws
+    /// Deletes for good, all at once (leaves hidden `deletedAt` markers for sync).
+    func deleteLinks(ids: Set<SavedLink.ID>) async throws
 
     func fetchLinkFolders() async throws -> [LinkFolder]
     /// Inserts or replaces by id.

@@ -25,7 +25,7 @@ struct LocalBookmarkServiceTests {
     @Test func `keeps saved links and folders across launches`() async throws {
         let folder = LinkFolder(id: "libs", name: "Libraries")
         try await library.service().saveLinkFolder(folder)
-        try await library.service().saveLink(SavedLink(url: URL(string: "https://ui.aceternity.com")!, title: "Aceternity UI", folderID: folder.id))
+        try await library.service().saveLinks([SavedLink(url: URL(string: "https://ui.aceternity.com")!, title: "Aceternity UI", folderID: folder.id)])
 
         let relaunched = library.service()
         #expect(try await relaunched.fetchLinks().map(\.title) == ["Aceternity UI"])
@@ -38,10 +38,18 @@ struct LocalBookmarkServiceTests {
 
         #expect(service.takeLaunchWarning() == nil)
         #expect(try await service.fetchLinks().isEmpty)
-        try await service.saveLink(SavedLink(url: URL(string: "https://example.com")!))
+        try await service.saveLinks([SavedLink(url: URL(string: "https://example.com")!)])
         let snapshot = try StashJSON.decoder.decode(LibrarySnapshot.self, from: Data(contentsOf: library.fileURL))
         #expect(snapshot.schemaVersion == LibrarySnapshot.currentSchemaVersion)
         #expect(snapshot.links.count == 1)
+    }
+
+    @Test func `keeps a library without bookmarks in the format older versions can save`() async throws {
+        let service = library.service()
+        try await service.saveBookmark(.sample(id: "1"))
+
+        let snapshot = try StashJSON.decoder.decode(LibrarySnapshot.self, from: Data(contentsOf: library.fileURL))
+        #expect(snapshot.schemaVersion == 1)
     }
 
     @Test func `replaces a bookmark saved again under the same id`() async throws {

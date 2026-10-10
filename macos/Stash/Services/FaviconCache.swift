@@ -11,6 +11,8 @@ final class FaviconCache {
     private let directory: URL
     private let session: URLSession
     private let memory = NSCache<NSURL, NSImage>()
+    /// Icons are a few KB; anything this big isn't one.
+    private let maxIconBytes = 1024 * 1024
     /// One download per icon, however many rows ask for it at once.
     private var loading: [URL: Task<NSImage?, Never>] = [:]
     /// Icons that couldn't be loaded this session; not retried until relaunch.
@@ -20,7 +22,7 @@ final class FaviconCache {
         directory: URL = URL.cachesDirectory
             .appending(path: Bundle.main.bundleIdentifier ?? "Stash", directoryHint: .isDirectory)
             .appending(path: "Favicons", directoryHint: .isDirectory),
-        session: URLSession = .shared
+        session: URLSession = URLSession(configuration: .ephemeral)
     ) {
         self.directory = directory
         self.session = session
@@ -58,6 +60,7 @@ final class FaviconCache {
 
         guard let (data, response) = try? await session.data(from: url),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
+              data.count <= maxIconBytes,
               let image = NSImage(data: data)
         else { return nil }
 

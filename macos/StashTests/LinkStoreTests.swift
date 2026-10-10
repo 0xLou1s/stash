@@ -146,3 +146,68 @@ struct LinkStoreTagTests {
         #expect(link.tags.isEmpty)
     }
 }
+
+@Suite("LinkStore while page details load")
+struct LinkStoreLoadingTests {
+    let library = TemporaryLibrary()
+
+    /// Holds every page-details request until opened.
+    actor Gate {
+        private var isOpen = false
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            guard !isOpen else { return }
+            await withCheckedContinuation { waiting.append($0) }
+        }
+
+        func open() {
+            isOpen = true
+            waiting.forEach { $0.resume() }
+            waiting.removeAll()
+        }
+    }
+
+    @Test func `a link trashed or deleted while its details load stays that way`() async throws {
+        let gate = Gate()
+        let (started, onStart) = AsyncStream<Void>.makeStream()
+        let icon = URL(string: "https://icon.dev/i.png")!
+        let store = LinkStore(service: library.service()) { _ in
+            onStart.yield()
+            await gate.wait()
+            return LinkMetadata(title: "Fetched", iconURL: icon)
+        }
+        await store.load()
+        let added = await store.importPages([
+            ImportedPage(title: "Trashed", url: URL(string: "https://a.dev")!),
+            ImportedPage(title: "Deleted", url: URL(string: "https://b.dev")!),
+        ], intoFolderNamed: "Imported")
+        let (trashed, deleted) = (added[0].id, added[1].id)
+
+        let loading = Task { await store.refreshMetadata(of: added.map(\.id), keepingTitles: true) }
+        var starts = started.makeAsyncIterator()
+        _ = await starts.next()
+        _ = await starts.next()
+        await store.moveToTrash([trashed])
+        await store.deletePermanently([deleted])
+        await gate.open()
+        await loading.value
+
+        let onDisk = try await library.service().fetchLinks()
+        #expect(onDisk.map(\.id) == [trashed], "the deleted link doesn't come back")
+        #expect(onDisk.first?.isTrashed == true, "the trashed link stays in Trash")
+        #expect(onDisk.first?.iconURL == icon)
+        #expect(onDisk.first?.title == "Trashed")
+    }
+
+    @Test func `several pages are saved at once, without duplicates`() async throws {
+        let store = LinkStore(service: library.service()) { url in LinkMetadata(title: "Title of \(url.displayHost)") }
+        await store.load()
+        let urls = ["https://a.dev", "https://b.dev", "https://a.dev"].map { URL(string: $0)! }
+
+        await store.add(urls, to: nil)
+
+        #expect(Set(store.links.map(\.title)) == ["Title of a.dev", "Title of b.dev"])
+        #expect(try await library.service().fetchLinks().count == 2)
+    }
+}

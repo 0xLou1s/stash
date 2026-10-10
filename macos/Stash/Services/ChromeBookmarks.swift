@@ -1,14 +1,14 @@
 import Foundation
 
 /// A page from another browser's bookmarks.
-struct ImportedPage: Hashable {
+nonisolated struct ImportedPage: Hashable {
     var title: String
     var url: URL
     var addedAt: Date?
 }
 
 /// A Chrome profile that has bookmarks.
-struct ChromeProfile: Identifiable, Hashable {
+nonisolated struct ChromeProfile: Identifiable, Hashable {
     /// The profile's folder, e.g. "Default" or "Profile 2".
     let id: String
     /// The name shown in Chrome's profile menu.
@@ -18,7 +18,7 @@ struct ChromeProfile: Identifiable, Hashable {
 
 /// A Chrome bookmark folder, with only the parts Stash can import: web pages,
 /// and subfolders that contain some.
-struct ChromeFolder: Identifiable, Hashable {
+nonisolated struct ChromeFolder: Identifiable, Hashable {
     let id: String
     let name: String
     /// Pages directly in this folder.
@@ -34,7 +34,7 @@ struct ChromeFolder: Identifiable, Hashable {
 
 /// Reads Chrome's bookmarks. Each profile keeps them in a JSON file that Chrome
 /// replaces whole on every change, so it's safe to read while Chrome runs.
-enum ChromeBookmarks {
+nonisolated enum ChromeBookmarks {
     static let directory = URL.homeDirectory
         .appending(path: "Library/Application Support/Google/Chrome", directoryHint: .isDirectory)
 
