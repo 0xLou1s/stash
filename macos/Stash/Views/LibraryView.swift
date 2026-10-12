@@ -70,6 +70,8 @@ struct AppearanceMenu: View {
     }
 }
 
+// Previews compile in Release too, so they stay with their Debug-only helper.
+#if DEBUG
 #Preview {
     @Previewable @State var store = BookmarkStore(service: LocalBookmarkService.preview)
     @Previewable @State var linkStore = LinkStore(service: LocalBookmarkService.preview)
@@ -82,7 +84,6 @@ struct AppearanceMenu: View {
         }
 }
 
-#if DEBUG
 extension LocalBookmarkService {
     /// One file for both previewed stores, so neither overwrites the other's changes.
     static let preview = LocalBookmarkService(fileURL: .temporaryDirectory.appending(path: "stash-preview.json"))
