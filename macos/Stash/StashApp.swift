@@ -7,6 +7,7 @@ struct StashApp: App {
     static let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     @State private var store: BookmarkStore
+    @State private var linkStore: LinkStore
     @State private var bridge: ExtensionBridge
     @State private var updater = Updater()
     @AppStorage("appearance") private var appearance: Appearance = .system
@@ -17,8 +18,10 @@ struct StashApp: App {
         // their placeholders as you scroll or switch views.
         URLCache.shared = URLCache(memoryCapacity: 128 * 1024 * 1024, diskCapacity: 1024 * 1024 * 1024)
 
-        let store = BookmarkStore(service: LocalBookmarkService())
+        let service = LocalBookmarkService()
+        let store = BookmarkStore(service: service)
         _store = State(initialValue: store)
+        _linkStore = State(initialValue: LinkStore(service: service))
         _bridge = State(initialValue: ExtensionBridge(store: store))
     }
 
@@ -26,8 +29,10 @@ struct StashApp: App {
         WindowGroup {
             LibraryView()
                 .environment(store)
+                .environment(linkStore)
                 .task {
                     await store.load()
+                    await linkStore.load()
                     // Only after loading, so posts from the extension merge with what's on disk.
                     if !Self.isHostingTests { bridge.start() }
                 }
@@ -45,10 +50,14 @@ struct StashApp: App {
             }
             CommandGroup(after: .newItem) {
                 Button("Refresh") {
-                    Task { await store.load() }
+                    Task {
+                        await store.load()
+                        await linkStore.load()
+                    }
                 }
                 .keyboardShortcut("r")
             }
+            LibraryModeCommands()
             CommandGroup(before: .sidebar) {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(Appearance.allCases) { option in

@@ -22,6 +22,36 @@ struct LocalBookmarkServiceTests {
         #expect(try await relaunched.fetchCollections().map(\.name) == ["Design"])
     }
 
+    @Test func `keeps saved links and folders across launches`() async throws {
+        let folder = LinkFolder(id: "libs", name: "Libraries")
+        try await library.service().saveLinkFolder(folder)
+        try await library.service().saveLinks([SavedLink(url: URL(string: "https://ui.aceternity.com")!, title: "Aceternity UI", folderID: folder.id)])
+
+        let relaunched = library.service()
+        #expect(try await relaunched.fetchLinks().map(\.title) == ["Aceternity UI"])
+        #expect(try await relaunched.fetchLinkFolders().map(\.name) == ["Libraries"])
+    }
+
+    @Test func `opens a library from before bookmarks, and saves it in the new format`() async throws {
+        try library.write(#"{ "schemaVersion": 1, "bookmarks": [], "collections": [] }"#)
+        let service = library.service()
+
+        #expect(service.takeLaunchWarning() == nil)
+        #expect(try await service.fetchLinks().isEmpty)
+        try await service.saveLinks([SavedLink(url: URL(string: "https://example.com")!)])
+        let snapshot = try StashJSON.decoder.decode(LibrarySnapshot.self, from: Data(contentsOf: library.fileURL))
+        #expect(snapshot.schemaVersion == LibrarySnapshot.currentSchemaVersion)
+        #expect(snapshot.links.count == 1)
+    }
+
+    @Test func `keeps a library without bookmarks in the format older versions can save`() async throws {
+        let service = library.service()
+        try await service.saveBookmark(.sample(id: "1"))
+
+        let snapshot = try StashJSON.decoder.decode(LibrarySnapshot.self, from: Data(contentsOf: library.fileURL))
+        #expect(snapshot.schemaVersion == 1)
+    }
+
     @Test func `replaces a bookmark saved again under the same id`() async throws {
         let service = library.service()
         try await service.saveBookmark(.sample(id: "1", text: "old"))
@@ -66,7 +96,7 @@ struct LocalBookmarkServiceTests {
 
     @Test func `keeps a newer library it can't decode at all, read-only, in place`() async throws {
         // A future format this version can't parse (here: bookmarks became an object).
-        try library.write(#"{ "schemaVersion": 2, "bookmarks": { "byID": {} } }"#)
+        try library.write(#"{ "schemaVersion": 3, "bookmarks": { "byID": {} } }"#)
         let service = library.service()
 
         #expect(service.takeLaunchWarning()?.contains("newer version") == true)
