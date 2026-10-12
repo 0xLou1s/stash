@@ -6,6 +6,22 @@
     <description>Updates for Stash for Mac. Written by scripts/release-mac.sh; installed copies read it.</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.0</title>
+      <pubDate>Mon, 12 Oct 2026 02:38:49 GMT</pubDate>
+      <sparkle:version>11</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <description sparkle:format="markdown"><![CDATA[**Bookmarks.** Save web pages next to your X posts: switch with ⌘1 / ⌘2 or the first toolbar button.
+
+- Finder-style list with Name, Tags and Site columns
+- Folders, tags, Trash and search
+- Drag a link in, paste a URL, or press ⌘D
+- Import folders from Chrome
+
+Once you save a bookmark, older versions of Stash open your library read-only.]]></description>
+      <enclosure url="https://github.com/0xLou1s/stash/releases/download/mac-v0.2.0/Stash-0.2.0.zip" type="application/octet-stream" sparkle:edSignature="YeVXv8JPmhHyrBxpFQbYHnXaBhzb+6gZBbpEW4W9LKlfIW9/AMoYSEVKMJj03QrGRljaVuxnAoaOEm/gj13HBw==" length="4602591" />
+    </item>
+    <item>
       <title>Version 0.1.2</title>
       <pubDate>Thu, 08 Oct 2026 18:53:36 GMT</pubDate>
       <sparkle:version>10</sparkle:version>
